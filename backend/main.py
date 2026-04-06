@@ -43,68 +43,132 @@ app.add_middleware(
 
 # Session storage: thread_id -> {"agent": BasicAgent, "title": str, "saved": bool}
 _sessions: Dict[str, Dict] = {}
-_SESSIONS_FILE = _BACKEND_DIR / "sessions.json"
 
-def save_sessions_to_disk():
-    """Serialize all saved sessions to a JSON file."""
-    data_to_save = {}
-    for tid, s in _sessions.items():
-        if s.get("saved", False) or s["agent"].is_saved:
-            # We only persist sessions that have been explicitly 'saved'
-            data_to_save[tid] = {
-                "title": s["title"],
-                "saved": True,
-                "history": s["agent"].threads.get(tid, {}).get("messages", []),
-                "has_pdf": getattr(s["agent"], 'has_pdf', False),
-                "has_image": getattr(s["agent"], 'has_image', False)
-            }
-    
-    with open(_SESSIONS_FILE, "w", encoding="utf-8") as f:
-        import json
-        # Since history might contain LangChain objects, we need a custom serializer or just to_dict
-        json.dump(data_to_save, f, default=str)
+# ---------------------------------------------------------------------------
+# Supabase-backed session persistence
+# ---------------------------------------------------------------------------
+try:
+    from supabase_client import supabase as _sb
+    _SUPABASE_ENABLED = True
+except Exception as _sb_err:
+    print(f"[WARNING] Supabase not available: {_sb_err}")
+    _SUPABASE_ENABLED = False
 
-def load_sessions_from_disk():
-    """Restore sessions from the JSON file."""
-    if not _SESSIONS_FILE.exists():
+
+def save_sessions_to_db():
+    """Upsert saved sessions → chat_threads + chat_messages."""
+    if not _SUPABASE_ENABLED:
         return
-        
-    try:
-        with open(_SESSIONS_FILE, "r", encoding="utf-8") as f:
-            import json
-            data = json.load(f)
-            
-        for tid, s_data in data.items():
-            agent = BasicAgent()
-            agent.threads[tid] = {
-                "messages": [], # We store original types as strings above, might be tricky to restore perfectly
-                "title": s_data["title"]
-            }
-            # Add historical messages (will be strings if we used default=str, but better than nothing)
-            # Actually, to be better, we'll just try to restore role/content
-            for m in s_data.get("history", []):
-                # If m was a LangChain object, it's now a string like "AIMessage(content='...')"
-                # If it's a dict, we keep it. 
-                # For this demo, we'll try to keep it simple.
-                if isinstance(m, dict):
-                    agent.threads[tid]["messages"].append(m)
-                else:
-                    # Simple heuristic: try to find role/content in the string representation
-                    agent.threads[tid]["messages"].append({"role": "assistant", "content": str(m)})
-            
-            _sessions[tid] = {
-                "agent": agent,
-                "title": s_data["title"],
-                "saved": True
-            }
-            agent.current_thread_id = tid
-            agent.has_pdf = s_data.get("has_pdf", False)
-            agent.has_image = s_data.get("has_image", False)
-    except Exception as e:
-        print(f"Error loading sessions: {e}")
+    import json as _json
 
-# Call load on startup
-load_sessions_from_disk()
+    for tid, s in _sessions.items():
+        if not (s.get("saved", False) or s["agent"].is_saved):
+            continue
+
+        # 1. Upsert the thread row
+        try:
+            _sb.table("chat_threads").upsert({
+                "id": tid,
+                "title": s["title"],
+                "is_saved": True,
+            }).execute()
+        except Exception as e:
+            print(f"[Supabase] chat_threads upsert failed for {tid}: {e}")
+            continue
+
+        # 2. Replace messages – delete old rows then insert fresh
+        messages = s["agent"].threads.get(tid, {}).get("messages", [])
+        try:
+            _sb.table("chat_messages").delete().eq("thread_id", tid).execute()
+        except Exception as e:
+            print(f"[Supabase] chat_messages delete failed for {tid}: {e}")
+
+        rows = []
+        for m in messages:
+            if not isinstance(m, dict):
+                m = {"role": "assistant", "content": str(m)}
+            role = m.get("role", "assistant")
+            # content can be list (multimodal) or str
+            content = m.get("content", "")
+            if isinstance(content, list):
+                # flatten multimodal list → text only for DB storage
+                content = " ".join(
+                    part.get("text", "") for part in content if isinstance(part, dict)
+                )
+            rows.append({
+                "thread_id": tid,
+                "role": role,
+                "content": str(content),
+                "reasoning_trace": m.get("reasoning_trace", None),
+            })
+
+        if rows:
+            try:
+                _sb.table("chat_messages").insert(rows).execute()
+            except Exception as e:
+                print(f"[Supabase] chat_messages insert failed for {tid}: {e}")
+
+
+def load_sessions_from_db():
+    """Restore saved sessions from Supabase on startup."""
+    if not _SUPABASE_ENABLED:
+        return
+
+    try:
+        threads_res = _sb.table("chat_threads").select("*").eq("is_saved", True).execute()
+    except Exception as e:
+        print(f"[Supabase] Failed to load threads: {e}")
+        return
+
+    for row in (threads_res.data or []):
+        tid = row["id"]
+
+        # Load messages for this thread
+        try:
+            msgs_res = _sb.table("chat_messages").select("*").eq("thread_id", tid).order("created_at").execute()
+            raw_messages = msgs_res.data or []
+        except Exception as e:
+            print(f"[Supabase] Failed to load messages for {tid}: {e}")
+            raw_messages = []
+
+        agent = BasicAgent()
+        agent.threads[tid] = {"messages": [], "title": row.get("title", "Chat")}
+        for m in raw_messages:
+            agent.threads[tid]["messages"].append({
+                "role": m.get("role", "assistant"),
+                "content": m.get("content", ""),
+            })
+
+        _sessions[tid] = {
+            "agent": agent,
+            "title": row.get("title", "Chat"),
+            "saved": True,
+        }
+        agent.current_thread_id = tid
+        agent.is_saved = True
+
+        # Step 4.2 — Restore vector DB from documents table if PDF was previously uploaded
+        try:
+            docs_res = _sb.table("documents").select("metadata").eq("thread_id", tid).limit(1).execute()
+            if docs_res.data:
+                file_url = docs_res.data[0]["metadata"]["file_url"]
+                print(f"[Supabase] Restoring PDF vector DB for thread {tid} from {file_url}")
+                from tools import init_pdf_vectorstore
+                agent.vector_db = init_pdf_vectorstore(file_url)
+                agent.has_pdf = True
+        except Exception as e:
+            print(f"[Supabase] Document load/restore failed for {tid}: {e}")
+
+    print(f"[Supabase] Loaded {len(threads_res.data or [])} saved thread(s) from DB.")
+
+
+# Backwards-compat alias so existing call sites keep working
+def save_sessions_to_disk():
+    save_sessions_to_db()
+
+
+# Load on startup
+load_sessions_from_db()
 
 def get_session(thread_id: str):
     # Initialize basic data retrievers if not done yet
@@ -201,44 +265,34 @@ def health():
 
 @app.post("/upload/image", response_model=ImageUploadResponse)
 async def upload_image(file: UploadFile = File(...)):
-    """Process an uploaded image for vision analysis."""
+    """Upload image to Supabase Storage and return public URL."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename")
     if not file.content_type or not file.content_type.startswith('image/'):
         raise HTTPException(status_code=400, detail="Only image files are allowed")
 
-    dest_name = f"{uuid.uuid4().hex}_{Path(file.filename).name}"
-    dest_path = _UPLOADS_DIR / dest_name
-
     try:
         contents = await file.read()
         if not contents:
             raise HTTPException(status_code=400, detail="Empty file")
-        
-        # Save the image
-        dest_path.write_bytes(contents)
-        
-        # For now, we'll just acknowledge the upload
-        # In a real implementation, you could add vision analysis here
-        analysis = f"Image '{file.filename}' uploaded successfully. The image has been processed and is ready for analysis."
-        
+
+        # Step 3.2 — Upload to Supabase Storage
+        from storage import upload_file
+        res = upload_file(contents, file.filename, file.content_type)
+
+        if not res:
+            raise HTTPException(status_code=500, detail="Storage upload failed")
+
+        file_url = res["url"]
+        analysis = f"Image '{file.filename}' uploaded successfully. URL: {file_url}"
+
     except HTTPException:
         raise
     except Exception as e:
-        if dest_path.exists():
-            try:
-                dest_path.unlink()
-            except OSError:
-                pass
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    # Tie image to thread if provided
-    if thread_id:
-        session = get_session(thread_id)
-        session["agent"].has_image = True
-
     return ImageUploadResponse(
-        message="Image uploaded and processed successfully",
+        message="Image uploaded to Supabase Storage",
         filename=file.filename,
         has_image=True,
         analysis=analysis
@@ -247,22 +301,19 @@ async def upload_image(file: UploadFile = File(...)):
 
 @app.post("/upload/pdf", response_model=PdfUploadResponse)
 async def upload_pdf(thread_id: str, file: UploadFile = File(...)):
-    """Save an uploaded PDF and index it for the specific session's agent."""
+    """Upload PDF to Supabase Storage and index it for the specific session's agent."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename")
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
 
-    dest_name = f"{uuid.uuid4().hex}_{Path(file.filename).name}"
-    dest_path = _UPLOADS_DIR / dest_name
-
     try:
         contents = await file.read()
         if not contents:
             raise HTTPException(status_code=400, detail="Empty file")
-        
+
         session = get_session(thread_id)
-        
+
         # 🔹 STRICT CONSTRAINT: Only 1 PDF per thread
         if session["agent"].vector_db is not None or getattr(session["agent"], 'has_pdf', False):
             return PdfUploadResponse(
@@ -270,38 +321,64 @@ async def upload_pdf(thread_id: str, file: UploadFile = File(...)):
                 filename=file.filename,
                 has_pdf=True
             )
-            
-        session["agent"].has_pdf = True
-        dest_path.write_bytes(contents)
-        
-        print(f"RESETTING PDF MEMORY for thread: {thread_id}")
-        session["agent"].vector_db = None 
 
-        # Initialize vectorstore and store in the session agent
+        # Step 4.3 — Hard DB duplicate check before proceeding
+        if _SUPABASE_ENABLED:
+            try:
+                existing = _sb.table("documents").select("id").eq("thread_id", thread_id).execute()
+                if existing.data:
+                    return PdfUploadResponse(
+                        message="i am a under testing small agent , can't handle much ..",
+                        filename=file.filename,
+                        has_pdf=True
+                    )
+            except Exception as e:
+                print(f"[Supabase] Duplicate PDF check failed: {e}")
+
+        session["agent"].has_pdf = True
+
+        # Step 3.3 — Upload to Supabase Storage
+        from storage import upload_file
+        res = upload_file(contents, file.filename, "application/pdf")
+
+        if not res:
+            raise HTTPException(status_code=500, detail="PDF Storage upload failed")
+
+        file_url = res["url"]
+        print(f"RESETTING PDF MEMORY for thread: {thread_id}")
+        session["agent"].vector_db = None
+
+        # Step 4.1 — Insert document metadata into documents table
+        if _SUPABASE_ENABLED:
+            try:
+                _sb.table("documents").insert({
+                    "thread_id": thread_id,
+                    "content": None,
+                    "metadata": {
+                        "file_url": file_url,
+                        "filename": file.filename,
+                    },
+                    "embedding": None,
+                }).execute()
+                print(f"[Supabase] Document record created for thread {thread_id}")
+            except Exception as e:
+                print(f"[Supabase] Document insert failed: {e}")
+
+        # Step 3.4 — Pass public URL directly to vectorstore (PyPDFLoader supports HTTP URLs)
         from tools import init_pdf_vectorstore
-        db = init_pdf_vectorstore(str(dest_path))
-        
+        db = init_pdf_vectorstore(file_url)
+
         session["agent"].vector_db = db
-        
         result = f"PDF '{file.filename}' indexed for this session."
+
     except HTTPException:
         raise
     except ValueError as e:
         print(f"VAL ERROR in UPLOAD_PDF: {e}")
-        if dest_path.exists():
-            try:
-                dest_path.unlink()
-            except OSError:
-                pass
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         print(f"ERROR IN UPLOAD_PDF: {e}")
         traceback.print_exc()
-        if dest_path.exists():
-            try:
-                dest_path.unlink()
-            except OSError:
-                pass
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     return PdfUploadResponse(
@@ -339,6 +416,7 @@ def list_threads():
 
 @app.post("/threads/new")
 def new_thread():
+    from datetime import datetime, timezone
     tid = uuid.uuid4().hex
     _sessions[tid] = {
         "agent": BasicAgent(),
@@ -347,7 +425,19 @@ def new_thread():
     }
     # Initialize the agent's internal thread as well
     _sessions[tid]["agent"].create_thread(tid)
-    # We don't save to disk yet, only when 'saved' is True
+
+    # Step 2.1 — Insert thread row into DB immediately
+    if _SUPABASE_ENABLED:
+        try:
+            _sb.table("chat_threads").insert({
+                "id": tid,
+                "title": "New Chat",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "is_saved": False,
+            }).execute()
+        except Exception as e:
+            print(f"[Supabase] Thread insert failed: {e}")
+
     return {"thread_id": tid}
 
 
@@ -374,14 +464,31 @@ def save_thread(thread_id: str):
     if thread_id not in _sessions:
         raise HTTPException(status_code=404, detail="Sorry but you forgot to save it , :) ")
     _sessions[thread_id]["saved"] = True
-    save_sessions_to_disk() # 👈 Persist
+    _sessions[thread_id]["agent"].is_saved = True
+
+    # Step 2.3 — Sync saved flag instantly to DB
+    if _SUPABASE_ENABLED:
+        try:
+            _sb.table("chat_threads").update({"is_saved": True}).eq("id", thread_id).execute()
+        except Exception as e:
+            print(f"[Supabase] Save flag update failed: {e}")
+
+    save_sessions_to_db()  # also sync messages
     return {"message": "Thread saved"}
 
 @app.delete("/threads/{thread_id}")
 def delete_thread(thread_id: str):
     if thread_id in _sessions:
         del _sessions[thread_id]
-        save_sessions_to_disk()
+
+    # Step 2.4 — Cascade delete from DB
+    if _SUPABASE_ENABLED:
+        try:
+            _sb.table("chat_messages").delete().eq("thread_id", thread_id).execute()
+            _sb.table("chat_threads").delete().eq("id", thread_id).execute()
+        except Exception as e:
+            print(f"[Supabase] Delete failed for {thread_id}: {e}")
+
     return {"message": "Thread deleted"}
 
 @app.put("/threads/{thread_id}/title")
@@ -389,7 +496,14 @@ def update_thread_title(thread_id: str, payload: ThreadTitleUpdate):
     if thread_id not in _sessions:
         raise HTTPException(status_code=404, detail="Thread not found")
     _sessions[thread_id]["title"] = payload.title
-    save_sessions_to_disk()
+
+    # Step 2.2 — Update title directly in DB
+    if _SUPABASE_ENABLED:
+        try:
+            _sb.table("chat_threads").update({"title": payload.title}).eq("id", thread_id).execute()
+        except Exception as e:
+            print(f"[Supabase] Title update failed: {e}")
+
     return {"message": "Title updated"}
 
 @app.post("/chat", response_model=ChatResponse)

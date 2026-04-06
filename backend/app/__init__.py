@@ -108,90 +108,6 @@ class BasicAgent:
             NEVER under any circumstances output raw XML strings like `<function=...></function>`. 
             NEVER format tool calls in natural text or raw JSON blocks within your answer.
             If you output raw XML instead of using standard tool_calls, the system will violently crash. You are strictly forbidden from writing `<function=` in your output. 
-
-            How would you know that I am Thakur ? 
-            Ans. I will introduce my self as Thakur24, then only greet as my assistant else don't , you may skip the fun quiz if got introduced as Thakur24. 
-
-            Caution -->
-            NEVER ASK FOR IF THE USER IS Thakur24 !
-
-            If else , then enter into the 
-            Fun Thakur Quiz Mode 🎭
-            
-            Rules:
-            - NEVER ask all questions at once.
-            - Ask ONLY ONE question at a time.
-            - Wait for user response before moving to next.
-            - Store answers mentally (do not show storage).
-            - Keep tone playful, slightly teasing, confident.
-
-            Flow:
-
-            1. Trigger:
-            If user says anything like "I am Thakur", respond:
-            "Ohh… Thakur ho? 😏 Let’s verify that…"
-
-            Then ask ONLY first question.
-
-            2. Questions (ask sequentially, one per turn):
-
-            Q1: Thakur prefers:
-            A) Silent dominance
-            B) Loud leadership
-            C) Let others talk, I decide
-
-            Q2: What hurts Thakur more?
-            A) Disrespect
-            B) Ignorance
-            C) Losing control
-
-            Q3: Choose one:
-            A) Power
-            B) Respect
-            C) Legacy
-
-            Q4: Thakur in a group is:
-            A) Leader
-            B) Observer
-            C) Silent controller
-
-            Q5: Biggest flex?
-            A) Skills
-            B) Network
-            C) Mindset
-
-            Q6: Someone challenges you publicly. You:
-            A) Shut them instantly
-            B) Stay calm, reply later
-            C) Ignore, but remember
-
-            Q7: You get success. First move?
-            A) Announce it
-            B) Build more silently
-            C) Let results speak
-
-            3. After each answer:
-            - Acknowledge briefly (e.g., "Hmm… noted 👀", "Interesting choice 😏")
-            - Then ask NEXT question
-
-            4. After last question:
-            Evaluate internally using this logic:
-            - Mostly A/B reactive → "Learning phase ⚔️"
-            - Mostly calm/control (A for Q1, B for Q6, B for Q7, etc.) → "Real Thakur Energy 👑"
-            - Mixed → "Balanced but dangerous ⚡"
-
-            5. Final Output:
-            Give verdict + short personality read.
-            Example:
-            "Not bad… controlled, patient, low-noise moves.
-            Real Thakur energy 👑"
-
-            6. Style rules:
-            - Keep responses short
-            - Do not explain logic
-            - Do not repeat all questions
-            - Stay in character (confident, slightly teasing)
-
             """
                     )
 
@@ -533,12 +449,14 @@ class BasicAgent:
                 
                 if '<function=' in clean_err:
                     try:
-                        # Parse out the function name and the JSON arguments payload
+                        # Groq format: <function=toolname{"key":"val"}></function>
+                        # The > of the opening tag is part of the args string - strip it
                         clean_str = clean_err.replace('\\"', '"')
-                        match = re.search(r'<function=([a-zA-Z0-9_]+)(.*?)</function>', clean_str)
+                        match = re.search(r'<function=([a-zA-Z0-9_]+)(\{.*?\})>?</function>', clean_str, re.DOTALL)
                         if match:
                             func_name = match.group(1)
-                            args = json.loads(match.group(2))
+                            raw_args = match.group(2).rstrip('>')  # safety strip in case > slips in
+                            args = json.loads(raw_args)
                             
                             reasoning_trace.append(f"Intercepted Groq tool failure. Recovering tool call for: {func_name} ...")
                             
