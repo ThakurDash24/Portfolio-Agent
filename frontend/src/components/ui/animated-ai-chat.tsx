@@ -1,13 +1,11 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, Fragment } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { cn } from '../../lib/utils';
 import {
     SendIcon,
     XIcon,
     LoaderIcon,
-    Paperclip,
-    Command,
     ChevronDown,
     ChevronUp,
     User,
@@ -17,17 +15,18 @@ import {
     Menu,
     History,
     Search,
-    Upload,
     FileText,
     ImageIcon,
-    FileUp,
     MonitorIcon,
-    PenTool
+    PenTool,
+    LogOut
 } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from "framer-motion";
 import GradientMenu from './gradient-menu';
+import { useNavigate } from 'react-router-dom';
+import { getAccessToken, supabase } from '../../lib/supabaseClient';
 
 interface Message {
     id: string;
@@ -153,24 +152,43 @@ export function AnimatedAIChat() {
     const [showCommandPalette, setShowCommandPalette] = useState(false);
     const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
     const [inputFocused, setInputFocused] = useState(false);
-    const [isWebSearching, setIsWebSearching] = useState(false);
     const [statusLabel, setStatusLabel] = useState<string | null>(null);
-    const [isWebSearchMode, setIsWebSearchMode] = useState(false);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const pdfInputRef = useRef<HTMLInputElement>(null);
     const commandPaletteRef = useRef<HTMLDivElement>(null);
-    const webSearchButtonRef = useRef<HTMLButtonElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const { adjustHeight } = useAutoResizeTextarea({
-        minHeight: 60,
-        maxHeight: 200,
-    });
+    const { adjustHeight } = useAutoResizeTextarea({ minHeight: 60, maxHeight: 200 });
     const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
     const [currentHasPdf, setCurrentHasPdf] = useState(false);
     const [currentHasPhoto, setCurrentHasPhoto] = useState(false);
+    const [userEmail, setUserEmail] = useState<string | null>(null);
+    const navigate = useNavigate();
 
-    const commandSuggestions: CommandSuggestion[] = [
+    // 🔐 Auth guard: redirect to login if no active Supabase session
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data }: { data: { session: any } }) => {
+            if (!data.session) {
+                navigate('/login', { replace: true });
+            } else {
+                setUserEmail(data.session.user?.email || null);
+            }
+        });
+    }, [navigate]);
+
+    /** Returns headers with Bearer token for authenticated API calls. Throws if no session. */
+    const authHeaders = async (): Promise<Record<string, string>> => {
+        const token = await getAccessToken();
+        if (!token) {
+            navigate('/login', { replace: true });
+            throw new Error('No auth token — redirecting to login');
+        }
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+        };
+    };
+
+    const commandSuggestions = useMemo<CommandSuggestion[]>(() => [
         {
             icon: <Search className="w-4 h-4" />,
             label: "Browser Search",
@@ -189,7 +207,7 @@ export function AnimatedAIChat() {
             description: "Generate a new web page",
             prefix: "/page"
         },
-    ];
+    ], []);
 
     useEffect(() => {
         if (value.startsWith('/') && !value.includes(' ')) {
@@ -322,12 +340,15 @@ export function AnimatedAIChat() {
 
             // If no thread exists, create one BEFORE sending the message
             if (!activeThreadId) {
-                const threadResponse = await fetch("http://127.0.0.1:8000/threads/new", { method: "POST" });
+                const headers = await authHeaders();
+                const threadResponse = await fetch("http://127.0.0.1:8000/threads/new", {
+                    method: "POST",
+                    headers,
+                });
                 if (!threadResponse.ok) throw new Error("Failed to create thread");
                 const threadData = await threadResponse.json();
                 activeThreadId = threadData.thread_id;
                 setCurrentThreadId(activeThreadId);
-                // We'll fetch threads after the first message is processed to show the new title
             }
 
             let imagesBase64: string[] = [];
@@ -343,9 +364,10 @@ export function AnimatedAIChat() {
                 imagesBase64.push(dataUrl);
             }
 
+            const chatHeaders = await authHeaders();
             const response = await fetch("http://127.0.0.1:8000/chat", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: chatHeaders,
                 body: JSON.stringify({
                     message: userMessage.content,
                     thread_id: activeThreadId,
@@ -387,6 +409,7 @@ export function AnimatedAIChat() {
 
             for (let i = 0; i < words.length; i++) {
                 currentText += (i === 0 ? "" : " ") + words[i];
+                // eslint-disable-next-line no-loop-func
                 setMessages(prev => {
                     const newMessages = [...prev];
                     const lastIdx = newMessages.length - 1;
@@ -437,8 +460,10 @@ export function AnimatedAIChat() {
             try {
                 setStatusLabel("Uploading image...");
                 setIsTyping(true);
+                const imageToken = await getAccessToken();
                 const res = await fetch(`http://127.0.0.1:8000/upload/image${currentThreadId ? `?thread_id=${currentThreadId}` : ''}`, {
                     method: "POST",
+                    headers: imageToken ? { 'Authorization': `Bearer ${imageToken}` } : {},
                     body: formData,
                 });
                 const data = await res.json();
@@ -456,7 +481,11 @@ export function AnimatedAIChat() {
             let activeThreadId = currentThreadId;
             if (!activeThreadId) {
                 try {
-                    const threadResponse = await fetch("http://127.0.0.1:8000/threads/new", { method: "POST" });
+                    const headers = await authHeaders();
+                    const threadResponse = await fetch("http://127.0.0.1:8000/threads/new", {
+                        method: "POST",
+                        headers,
+                    });
                     const threadData = await threadResponse.json();
                     activeThreadId = threadData.thread_id;
                     setCurrentThreadId(activeThreadId);
@@ -471,8 +500,10 @@ export function AnimatedAIChat() {
             try {
                 setStatusLabel("Indexing PDF for this session...");
                 setIsTyping(true);
+                const pdfToken = await getAccessToken();
                 const res = await fetch(`http://127.0.0.1:8000/upload/pdf?thread_id=${activeThreadId}`, {
                     method: "POST",
+                    headers: pdfToken ? { 'Authorization': `Bearer ${pdfToken}` } : {},
                     body: formData,
                 });
                 const data = await res.json();
@@ -486,48 +517,11 @@ export function AnimatedAIChat() {
         }
     };
 
+
+
     const handleWebSearch = () => {
-        setIsWebSearchMode(true);
         setValue('/browser ');
         textareaRef.current?.focus();
-    };
-
-    const performWebSearch = async () => {
-        if (!value.trim() || !value.startsWith('/websearch')) return;
-
-        setIsWebSearching(true);
-
-        try {
-            const query = value.replace('/websearch ', '').trim();
-            const response = await fetch('http://127.0.0.1:8000/websearch', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ query }),
-            });
-
-            const data = await response.json();
-            console.log('Web search results:', data);
-
-            // Add search results to messages
-            const searchResultMessage: Message = {
-                id: Date.now().toString(),
-                content: `Web search results for "${query}":\n\n${JSON.stringify(data.results, null, 2)}`,
-                role: 'assistant',
-                timestamp: new Date(),
-            };
-
-            setMessages(prev => [...prev, searchResultMessage]);
-        } catch (error) {
-            console.error('Web search error:', error);
-        } finally {
-            setTimeout(() => {
-                setIsWebSearching(false);
-                setIsWebSearchMode(false);
-                setValue('');
-            }, 2000);
-        }
     };
 
     const removeAttachment = (index: number) => {
@@ -549,7 +543,18 @@ export function AnimatedAIChat() {
 
     const fetchThreads = async () => {
         try {
-            const response = await fetch("http://127.0.0.1:8000/threads");
+            const token = await getAccessToken();
+            if (!token) return; // Not logged in yet, skip silently
+            const headers = {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            };
+            const response = await fetch("http://127.0.0.1:8000/threads", { headers });
+            if (!response.ok) {
+                console.warn('fetchThreads HTTP error:', response.status);
+                setThreads([]);
+                return;
+            }
             const data = await response.json();
             if (Array.isArray(data)) {
                 setThreads(data);
@@ -564,6 +569,7 @@ export function AnimatedAIChat() {
 
     useEffect(() => {
         fetchThreads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const handleNewChat = () => {
@@ -580,12 +586,14 @@ export function AnimatedAIChat() {
     const handleSaveSession = async () => {
         if (!currentThreadId) return;
         try {
+            const headers = await authHeaders();
             const response = await fetch(`http://127.0.0.1:8000/save_thread/${currentThreadId}`, {
-                method: "POST"
+                method: "POST",
+                headers,
             });
             if (response.ok) {
                 setIsSaved(true);
-                fetchThreads(); // 👈 Refresh the sidebar history immediately
+                fetchThreads();
                 setTimeout(() => setIsSaved(false), 3000);
             }
         } catch (e) {
@@ -595,7 +603,8 @@ export function AnimatedAIChat() {
 
     const loadThread = async (id: string) => {
         try {
-            const response = await fetch(`http://127.0.0.1:8000/thread/${id}`);
+            const headers = await authHeaders();
+            const response = await fetch(`http://127.0.0.1:8000/thread/${id}`, { headers });
             const data = await response.json();
             // Map formatted messages back to Message objects
             const loadedMessages: Message[] = data.messages.map((m: any) => {
@@ -626,7 +635,8 @@ export function AnimatedAIChat() {
     const deleteThreadFromHistory = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
         try {
-            await fetch(`http://127.0.0.1:8000/threads/${id}`, { method: 'DELETE' });
+            const headers = await authHeaders();
+            await fetch(`http://127.0.0.1:8000/threads/${id}`, { method: 'DELETE', headers });
             if (currentThreadId === id) handleNewChat();
             fetchThreads();
         } catch (e) {
@@ -646,9 +656,10 @@ export function AnimatedAIChat() {
             return;
         }
         try {
+            const headers = await authHeaders();
             await fetch(`http://127.0.0.1:8000/threads/${id}/title`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
+                headers,
                 body: JSON.stringify({ title: editingTitle.trim() }),
             });
             fetchThreads();
@@ -657,6 +668,11 @@ export function AnimatedAIChat() {
         } finally {
             setEditingThreadId(null);
         }
+    };
+
+    const handleSignOut = async () => {
+        await supabase.auth.signOut();
+        navigate('/login');
     };
 
     const isChatMode = messages.length > 0;
@@ -709,8 +725,8 @@ export function AnimatedAIChat() {
                         </motion.div>
                     </div>
 
-                    {/* Right: Save Session Actions */}
-                    <div className="flex justify-end items-center gap-2 z-10">
+                    {/* Right: Save Session Actions & Account */}
+                    <div className="flex justify-end items-center gap-4 z-10">
                         {currentThreadId && (
                             <motion.button
                                 initial={{ opacity: 0, scale: 0.9 }}
@@ -726,6 +742,21 @@ export function AnimatedAIChat() {
                                 {isSaved ? "Saved ✓" : "Save Chat"}
                             </motion.button>
                         )}
+                        
+                        {/* Persistent Account Section */}
+                        <div className="flex items-center gap-3 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl backdrop-blur-md pointer-events-auto shadow-lg">
+                            <div className="flex flex-col items-end pr-3 border-r border-white/10">
+                                <span className="text-[9px] text-white/40 uppercase tracking-widest font-bold">Account</span>
+                                <span className="text-xs font-medium text-white/80">{userEmail || 'User'}</span>
+                            </div>
+                            <button 
+                                onClick={handleSignOut}
+                                className="p-2 rounded-lg hover:bg-red-500/20 transition-all duration-300 text-white/40 hover:text-red-400 group focus:outline-none"
+                                title="Sign Out"
+                            >
+                                <LogOut className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                            </button>
+                        </div>
                     </div>
                 </nav>
             </header>

@@ -27,3 +27,4 @@ pillow
 supabase
 vecs
 litellm
+python-jose[cryptography]

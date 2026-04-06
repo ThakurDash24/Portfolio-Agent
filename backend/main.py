@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile, Depends
+from auth import get_current_user
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
@@ -170,18 +171,17 @@ def save_sessions_to_disk():
 # Load on startup
 load_sessions_from_db()
 
-def get_session(thread_id: str):
+def get_session(thread_id: str, user_id: str):
+    """Return the in-memory session for thread_id, verifying ownership via Supabase."""
     # Initialize basic data retrievers if not done yet
     from tools import init_retriever, bm25_retriever
     if bm25_retriever is None:
         try:
-            # Fallback data if file is missing/broken
             guest_data = [
                 "Biswajit: A fellow developer and friend of Laven.",
                 "Laven: The owner of this portfolio and a highly capable AI builder.",
                 "Thakur Dash: A Machine Learning Engineer with experience in GenAI and backend systems."
             ]
-            # Try to load from all_models.json
             import json
             if os.path.exists("all_models.json"):
                 try:
@@ -191,7 +191,7 @@ def get_session(thread_id: str):
                             guest_data = data
                 except:
                     pass
-            
+
             from langchain_core.documents import Document
             docs = [Document(page_content=d) for d in guest_data]
             init_retriever(docs)
@@ -199,13 +199,27 @@ def get_session(thread_id: str):
         except Exception as e:
             print(f"Failed to initialize guest retriever: {e}")
 
+    # 🔐 Ownership check — thread must belong to this user in the DB
+    if _SUPABASE_ENABLED:
+        try:
+            res = _sb.table("chat_threads") \
+                .select("id") \
+                .eq("id", thread_id) \
+                .eq("user_id", user_id) \
+                .execute()
+            if not res.data:
+                raise HTTPException(status_code=403, detail="Access denied")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Supabase] Ownership check failed: {e}")
+
     if thread_id not in _sessions:
         _sessions[thread_id] = {
-            "agent": BasicAgent(),  # NEW agent per thread
+            "agent": BasicAgent(),
             "title": "New Chat",
             "saved": False
         }
-        # Force a clean start for this agent's internal state
         _sessions[thread_id]["agent"].create_thread(thread_id)
     return _sessions[thread_id]
 
@@ -300,7 +314,7 @@ async def upload_image(file: UploadFile = File(...)):
 
 
 @app.post("/upload/pdf", response_model=PdfUploadResponse)
-async def upload_pdf(thread_id: str, file: UploadFile = File(...)):
+async def upload_pdf(thread_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user)):
     """Upload PDF to Supabase Storage and index it for the specific session's agent."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename")
@@ -312,7 +326,7 @@ async def upload_pdf(thread_id: str, file: UploadFile = File(...)):
         if not contents:
             raise HTTPException(status_code=400, detail="Empty file")
 
-        session = get_session(thread_id)
+        session = get_session(thread_id, user_id)
 
         # 🔹 STRICT CONSTRAINT: Only 1 PDF per thread
         if session["agent"].vector_db is not None or getattr(session["agent"], 'has_pdf', False):
@@ -406,16 +420,26 @@ def web_search(req: WebSearchRequest):
 
 
 @app.get("/threads", response_model=List[ThreadItem])
-def list_threads():
-    # Priority: agent.is_saved or session cache
+def list_threads(user_id: str = Depends(get_current_user)):
+    """Return only threads owned by the authenticated user."""
+    if _SUPABASE_ENABLED:
+        try:
+            res = _sb.table("chat_threads") \
+                .select("id, title") \
+                .eq("user_id", user_id) \
+                .execute()
+            return [ThreadItem(id=row["id"], title=row["title"]) for row in (res.data or [])]
+        except Exception as e:
+            print(f"[Supabase] list_threads failed: {e}")
+    # Fallback: in-memory (no user isolation guarantee)
     return [
-        ThreadItem(id=tid, title=s["title"]) 
-        for tid, s in _sessions.items() 
+        ThreadItem(id=tid, title=s["title"])
+        for tid, s in _sessions.items()
         if s.get("saved", False) or s["agent"].is_saved
     ]
 
 @app.post("/threads/new")
-def new_thread():
+def new_thread(user_id: str = Depends(get_current_user)):
     from datetime import datetime, timezone
     tid = uuid.uuid4().hex
     _sessions[tid] = {
@@ -423,10 +447,9 @@ def new_thread():
         "title": "New Chat",
         "saved": False
     }
-    # Initialize the agent's internal thread as well
     _sessions[tid]["agent"].create_thread(tid)
 
-    # Step 2.1 — Insert thread row into DB immediately
+    # ✅ Insert thread row with user_id binding
     if _SUPABASE_ENABLED:
         try:
             _sb.table("chat_threads").insert({
@@ -434,6 +457,7 @@ def new_thread():
                 "title": "New Chat",
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "is_saved": False,
+                "user_id": user_id,
             }).execute()
         except Exception as e:
             print(f"[Supabase] Thread insert failed: {e}")
@@ -442,9 +466,20 @@ def new_thread():
 
 
 @app.get("/thread/{thread_id}")
-def get_thread(thread_id: str):
+def get_thread(thread_id: str, user_id: str = Depends(get_current_user)):
+    # Verify ownership before returning
+    if _SUPABASE_ENABLED:
+        try:
+            res = _sb.table("chat_threads").select("id").eq("id", thread_id).eq("user_id", user_id).execute()
+            if not res.data:
+                raise HTTPException(status_code=403, detail="Access denied")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Supabase] Thread ownership check failed: {e}")
+
     if thread_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Sorry but you forgot to save it , :) ")
+        raise HTTPException(status_code=404, detail="Thread not found in memory. It may not be loaded yet.")
 
     session = _sessions[thread_id]
     agent = session["agent"]
@@ -460,28 +495,48 @@ def get_thread(thread_id: str):
 
 
 @app.post("/save_thread/{thread_id}")
-def save_thread(thread_id: str):
+def save_thread(thread_id: str, user_id: str = Depends(get_current_user)):
+    # Verify ownership
+    if _SUPABASE_ENABLED:
+        try:
+            res = _sb.table("chat_threads").select("id").eq("id", thread_id).eq("user_id", user_id).execute()
+            if not res.data:
+                raise HTTPException(status_code=403, detail="Access denied")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Supabase] Ownership check failed: {e}")
+
     if thread_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Sorry but you forgot to save it , :) ")
+        raise HTTPException(status_code=404, detail="Thread not found in memory")
     _sessions[thread_id]["saved"] = True
     _sessions[thread_id]["agent"].is_saved = True
 
-    # Step 2.3 — Sync saved flag instantly to DB
     if _SUPABASE_ENABLED:
         try:
             _sb.table("chat_threads").update({"is_saved": True}).eq("id", thread_id).execute()
         except Exception as e:
             print(f"[Supabase] Save flag update failed: {e}")
 
-    save_sessions_to_db()  # also sync messages
+    save_sessions_to_db()
     return {"message": "Thread saved"}
 
 @app.delete("/threads/{thread_id}")
-def delete_thread(thread_id: str):
+def delete_thread(thread_id: str, user_id: str = Depends(get_current_user)):
+    # Verify ownership before deletion
+    if _SUPABASE_ENABLED:
+        try:
+            res = _sb.table("chat_threads").select("id").eq("id", thread_id).eq("user_id", user_id).execute()
+            if not res.data:
+                raise HTTPException(status_code=403, detail="Access denied")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Supabase] Ownership check failed: {e}")
+
     if thread_id in _sessions:
         del _sessions[thread_id]
 
-    # Step 2.4 — Cascade delete from DB
     if _SUPABASE_ENABLED:
         try:
             _sb.table("chat_messages").delete().eq("thread_id", thread_id).execute()
@@ -492,12 +547,22 @@ def delete_thread(thread_id: str):
     return {"message": "Thread deleted"}
 
 @app.put("/threads/{thread_id}/title")
-def update_thread_title(thread_id: str, payload: ThreadTitleUpdate):
+def update_thread_title(thread_id: str, payload: ThreadTitleUpdate, user_id: str = Depends(get_current_user)):
+    # Verify ownership
+    if _SUPABASE_ENABLED:
+        try:
+            res = _sb.table("chat_threads").select("id").eq("id", thread_id).eq("user_id", user_id).execute()
+            if not res.data:
+                raise HTTPException(status_code=403, detail="Access denied")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Supabase] Ownership check failed: {e}")
+
     if thread_id not in _sessions:
         raise HTTPException(status_code=404, detail="Thread not found")
     _sessions[thread_id]["title"] = payload.title
 
-    # Step 2.2 — Update title directly in DB
     if _SUPABASE_ENABLED:
         try:
             _sb.table("chat_threads").update({"title": payload.title}).eq("id", thread_id).execute()
@@ -507,16 +572,16 @@ def update_thread_title(thread_id: str, payload: ThreadTitleUpdate):
     return {"message": "Title updated"}
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, user_id: str = Depends(get_current_user)):
     text = req.message.strip()
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
-    
+
     if not req.thread_id:
         raise HTTPException(status_code=400, detail="thread_id required")
-    
+
     thread_id = req.thread_id
-    session = get_session(thread_id)
+    session = get_session(thread_id, user_id)
     agent = session["agent"]
     
     # 🔹 Bind agent to thread_id

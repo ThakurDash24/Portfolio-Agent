@@ -452,7 +452,7 @@ class BasicAgent:
                         # Groq format: <function=toolname{"key":"val"}></function>
                         # The > of the opening tag is part of the args string - strip it
                         clean_str = clean_err.replace('\\"', '"')
-                        match = re.search(r'<function=([a-zA-Z0-9_]+)(\{.*?\})>?</function>', clean_str, re.DOTALL)
+                        match = re.search(r'<function=([a-zA-Z0-9_]+)\s*(\{.*?\})\s*>?', clean_str, re.DOTALL)
                         if match:
                             func_name = match.group(1)
                             raw_args = match.group(2).rstrip('>')  # safety strip in case > slips in
@@ -478,21 +478,23 @@ class BasicAgent:
                                 self.is_saved = True
                                 res = "Session successfully marked as saved."
                             
-                        # Feed the result back into LiteLLM
-                        messages.append({"role": "assistant", "content": f"I will now execute the {func_name} tool."})
-                        messages.append({"role": "tool", "tool_call_id": "fallback_id", "name": func_name, "content": str(res)})
-                        
-                        reasoning_trace.append(f"Successfully executed {func_name}. Generating final answer...")
-                        
-                        response = completion(
-                            model=model, 
-                            messages=messages,
-                            api_key=os.getenv("GROQ_API_KEY")
-                        )
-                        answer = response.choices[0].message.content
-                        
-                        formatted_reasoning = "\n".join([f"› {s}" for s in reasoning_trace])
-                        return answer, formatted_reasoning
+                            # Feed the result back into LiteLLM
+                            messages.append({"role": "assistant", "content": f"I will now execute the {func_name} tool."})
+                            messages.append({"role": "tool", "tool_call_id": "fallback_id", "name": func_name, "content": str(res)})
+                            
+                            reasoning_trace.append(f"Successfully executed {func_name}. Generating final answer...")
+                            
+                            response = completion(
+                                model=model, 
+                                messages=messages,
+                                api_key=os.getenv("GROQ_API_KEY")
+                            )
+                            answer = response.choices[0].message.content
+                            
+                            formatted_reasoning = "\n".join([f"› {s}" for s in reasoning_trace])
+                            return answer, formatted_reasoning
+                        else:
+                            raise ValueError(f"Could not parse XML tool trap: {clean_str}")
                         
                     except Exception as inner_e:
                         print(f"Failed to recover XML tool: {inner_e}")
