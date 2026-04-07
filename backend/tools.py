@@ -178,7 +178,7 @@ guest_info_tool = guest_info_retriever
 def search_the_web(query: str) -> str:
     """Use this for real-time info, unknown facts, or anything not in memory."""
     try:
-        from ddgs import DDGS
+        from duckduckgo_search import DDGS
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=5))
 
@@ -203,6 +203,16 @@ def browser_search_tool(query: str) -> str:
         options = Options()
         # Avoid common issues with automated browsers
         options.add_argument("--disable-blink-features=AutomationControlled")
+        
+        # 🚀 Production Support: Headless mode for cloud environments like Render
+        if os.getenv("RENDER") or os.getenv("HEADLESS"):
+            print("Production environment detected. Enabling headless browser mode...")
+            options.add_argument("--headless")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-gpu")
+            # Set a common user agent to avoid being blocked in headless mode
+            options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
         # Ensure query is encoded properly
         encoded_query = urllib.parse.quote(query)
