@@ -679,12 +679,11 @@ export function AnimatedAIChat() {
 
     return (
         <div className="h-screen flex flex-col w-full bg-transparent text-white relative overflow-hidden font-sans">
-            {/* Full-width Premium Header Component */}
             <header className={cn(
-                "fixed top-0 left-0 right-0 z-50 transition-all duration-500 ease-in-out px-6 w-full flex justify-center",
+                "fixed top-0 left-0 right-0 z-50 transition-all duration-500 ease-in-out px-4 md:px-6 w-full flex justify-center",
                 isHeaderScrolled 
-                    ? "py-3 bg-black/30 backdrop-blur-xl border-b border-white/5 shadow-2xl shadow-black/50" 
-                    : "py-8 bg-transparent backdrop-blur-none border-b-0"
+                    ? "py-3 bg-black/40 backdrop-blur-xl border-b border-white/5 shadow-2xl shadow-black/50" 
+                    : "py-6 md:py-8 bg-transparent backdrop-blur-none border-b-0"
             )}>
                 <nav className="w-full flex items-center justify-between relative">
                     
@@ -716,7 +715,7 @@ export function AnimatedAIChat() {
                         >
                             <div className="relative px-4 py-1.5 rounded-2xl pointer-events-auto cursor-pointer">
                                 <span className={cn(
-                                    "relative z-10 text-3xl font-playfair font-bold tracking-tighter transition-all duration-500",
+                                    "relative z-10 text-2xl sm:text-3xl font-playfair font-bold tracking-tighter transition-all duration-500",
                                     isHeaderScrolled ? "scale-90 opacity-90" : "scale-100 opacity-100"
                                 )}>
                                     Laven<span className="text-violet-400">.</span>
@@ -768,7 +767,7 @@ export function AnimatedAIChat() {
                         initial={{ opacity: 0, x: -50 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -50 }}
-                        className="fixed left-8 top-32 bottom-8 w-64 bg-black/40 backdrop-blur-3xl border border-white/10 rounded-2xl z-40 overflow-hidden flex flex-col shadow-2xl"
+                        className="fixed left-4 sm:left-8 top-24 sm:top-32 bottom-4 sm:bottom-8 w-[calc(100%-2rem)] sm:w-64 bg-black/60 backdrop-blur-3xl border border-white/10 rounded-2xl z-40 overflow-hidden flex flex-col shadow-2xl"
                     >
                         <div className="p-4 border-b border-white/5 flex items-center justify-between">
                             <span className="text-[10px] uppercase font-bold tracking-widest text-white/40 flex items-center gap-2">
@@ -880,10 +879,10 @@ export function AnimatedAIChat() {
                         animate={{ opacity: 1, y: 0 }}
                         className="flex flex-col items-center mb-12"
                     >
-                        <h1 className="text-5xl font-medium tracking-tight bg-clip-text text-transparent bg-[linear-gradient(110deg,#ffffffad,45%,#ffffff,55%,#ffffffad)] bg-[length:200%_100%] animate-text-shimmer mb-4">
+                        <h1 className="text-3xl sm:text-5xl font-medium tracking-tight bg-clip-text text-transparent bg-[linear-gradient(110deg,#ffffffad,45%,#ffffff,55%,#ffffffad)] bg-[length:200%_100%] animate-text-shimmer mb-4 text-center px-4">
                             How can I help today?
                         </h1>
-                        <p className="text-xl text-white/50 font-light italic">
+                        <p className="text-lg sm:text-xl text-white/50 font-light italic">
                             Hey, Laven is here ;)
                         </p>
                     </motion.div>
@@ -891,7 +890,7 @@ export function AnimatedAIChat() {
 
                 <div className={cn(
                     "w-full px-4 transition-all duration-700 z-10 relative",
-                    isChatMode ? "fixed bottom-0 left-0 right-0 py-10 bg-gradient-to-t from-black via-black/90 to-transparent" : "max-w-5xl"
+                    isChatMode ? "fixed bottom-0 left-0 right-0 py-6 sm:py-10 bg-gradient-to-t from-black via-black/95 to-transparent" : "max-w-5xl"
                 )}>
                     <div className="max-w-5xl mx-auto flex flex-col gap-6">
                         <motion.div
@@ -1073,7 +1072,7 @@ function MessageBubble({ message }: { message: Message }) {
             )}
         >
             <div className={cn(
-                "flex max-w-[85%] gap-4",
+                "flex max-w-[95%] sm:max-w-[85%] gap-2 sm:gap-4",
                 isAssistant ? "flex-row" : "flex-row-reverse"
             )}>
                 <motion.div

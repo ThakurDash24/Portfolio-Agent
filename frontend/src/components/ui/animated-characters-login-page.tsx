@@ -17,7 +17,7 @@ const SparklesBanner = React.memo(() => (
     <h1 className="text-5xl lg:text-6xl font-bold text-center text-white relative z-20 tracking-tight">
       Laven Welcomes You
     </h1>
-    <div className="w-[30rem] h-20 relative mt-2">
+    <div className="w-full max-w-[30rem] h-20 relative mt-2 px-4">
       <div className="absolute inset-x-10 top-0 bg-gradient-to-r from-transparent via-indigo-400 to-transparent h-[2px] w-3/4 blur-sm" />
       <div className="absolute inset-x-10 top-0 bg-gradient-to-r from-transparent via-indigo-400 to-transparent h-px w-3/4" />
       <div className="absolute inset-x-40 top-0 bg-gradient-to-r from-transparent via-violet-400 to-transparent h-[4px] w-1/4 blur-sm" />
@@ -563,7 +563,7 @@ function LoginPage() {
           </div>
         </div>
 
-        <div className="relative z-20 flex items-center gap-8 text-sm text-primary-foreground/60">
+        <div className="relative z-20 flex flex-wrap justify-center items-center gap-4 sm:gap-8 text-sm text-primary-foreground/60">
           <button type="button" className="hover:text-primary-foreground transition-colors bg-transparent border-0 cursor-pointer">
             Privacy Policy
           </button>
