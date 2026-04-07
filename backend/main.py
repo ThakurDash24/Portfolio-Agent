@@ -142,6 +142,7 @@ def restore_thread_into_memory(thread_id: str, user_id: Optional[str] = None):
 
         # Re-initialize agent
         agent = BasicAgent()
+        agent.user_id = user_id
         agent.threads[thread_id] = {"messages": [], "title": row.get("title", "Chat")}
         for m in raw_messages:
             agent.threads[thread_id]["messages"].append({
@@ -253,8 +254,10 @@ def get_session(thread_id: str, user_id: str):
             return restored
 
         # Otherwise, start a fresh one
+        agent = BasicAgent()
+        agent.user_id = user_id
         _sessions[thread_id] = {
-            "agent": BasicAgent(),
+            "agent": agent,
             "title": "New Chat",
             "saved": False,
             "user_id": user_id
@@ -511,8 +514,10 @@ def list_threads(user_id: str = Depends(get_optional_user)):
 def new_thread(user_id: str = Depends(get_optional_user)):
     from datetime import datetime, timezone
     tid = uuid.uuid4().hex
+    agent = BasicAgent()
+    agent.user_id = user_id
     _sessions[tid] = {
-        "agent": BasicAgent(),
+        "agent": agent,
         "title": "New Chat",
         "saved": False
     }
@@ -684,6 +689,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
                 summary_prompt = f"Summarize this initial message in exactly 3-5 words for a chat title: '{text}'. Format: Just the title, no extra text."
                 # Use a temp agent to avoid memory pollution in the main session
                 temp_agent = BasicAgent()
+                temp_agent.user_id = user_id
                 temp_agent.switch_thread("title_gen_temp")
                 title_res, _ = temp_agent(summary_prompt)
                 session["title"] = title_res.split('\n')[0].strip(' "')[:50]

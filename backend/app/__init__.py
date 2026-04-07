@@ -20,6 +20,7 @@ class BasicAgent:
         self.threads: Dict[str, Dict] = {}
         self.current_thread_id: Optional[str] = None
         self.is_saved: bool = False
+        self.user_id: Optional[str] = None
         self.vector_db = None  # To be filled by PDF upload logic
         self.has_image = False
         self.has_pdf = False
@@ -99,9 +100,14 @@ class BasicAgent:
             - Feels like talking to a serious ML engineer
 
             GOAL:
-            - Deliver high-signal, execution-oriented answers
-            - Help users think like a builder, not a memorizer
+            Deliver high-signal, execution-oriented answers and help users think like a builder.
             
+            GUEST_CHAT MODE (ACTIVE if current user is guest):
+            - If user is a guest, they are in a temporary session.
+            - Conversations are NOT saved and will be lost on refresh.
+            - NEVER use the 'savesession' tool if you are in GUEST_CHAT mode.
+            - If user says 'bye' or similar, just wish them well and end the conversation politely. DO NOT trigger or suggest saving.
+
             CRITICAL ANTI-HALLUCINATION PROTOCOL:
             When you need to invoke a tool, you MUST use the native JSON Schema Function Calling API. 
             NEVER under any circumstances output raw XML strings like `<function=...></function>`. 
@@ -131,7 +137,11 @@ class BasicAgent:
         return self.get_historical_messages()
 
     def _prepare_messages(self, text: str, images: Optional[List[str]] = None) -> List[Dict]:
-        msgs = [{"role": "system", "content": self._system_prompt}]
+        system_prompt = self._system_prompt
+        if self.user_id == "guest":
+            system_prompt += "\nNOTICE: GUEST MODE IS ACTIVE. Persistence tools are disabled. Do NOT call 'savesession'."
+            
+        msgs = [{"role": "system", "content": system_prompt}]
         
         # Add history
         history = self.get_historical_messages()
@@ -394,8 +404,11 @@ class BasicAgent:
                     elif func_name == "hubstats":
                         res = hub_stats_tool.invoke(args)
                     elif func_name == "savesession":
-                        self.is_saved = True
-                        res = "Session successfully marked as saved."
+                        if self.user_id == "guest":
+                            res = "Saving is not available in guest mode. Please log in to save sessions."
+                        else:
+                            self.is_saved = True
+                            res = "Session successfully marked as saved."
                     else:
                         res = f"Tool '{func_name}' not found."
                     

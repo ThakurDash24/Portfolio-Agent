@@ -164,6 +164,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
     const [currentHasPdf, setCurrentHasPdf] = useState(false);
     const [currentHasPhoto, setCurrentHasPhoto] = useState(false);
     const [userEmail, setUserEmail] = useState<string | null>(null);
+    const [isActionsOpen, setIsActionsOpen] = useState(false);
     const navigate = useNavigate();
 
     // 🔐 Auth guard: redirect to login if no active Supabase session
@@ -988,7 +989,41 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                                 )}
                             </AnimatePresence>
 
-                            <div className="min-h-[42px] relative px-4 py-1 flex items-center gap-4">
+                            <div className="min-h-[42px] relative px-4 py-1 flex items-center gap-1 sm:gap-4">
+                                {/* Compact Tools Trigger */}
+                                <div className="flex items-center">
+                                    <motion.button
+                                        type="button"
+                                        onClick={() => setIsActionsOpen(!isActionsOpen)}
+                                        className={cn(
+                                            "p-3 rounded-2xl transition-all duration-300 bg-white/5 border border-white/10 hover:bg-white/10",
+                                            isActionsOpen ? "text-violet-400 bg-violet-500/10 border-violet-500/50" : "text-white/40 hover:text-white"
+                                        )}
+                                        title="Tools"
+                                    >
+                                        <Plus className={cn("w-5 h-5 transition-transform duration-500", isActionsOpen ? "rotate-[135deg]" : "")} />
+                                    </motion.button>
+                                    
+                                    <AnimatePresence>
+                                        {isActionsOpen && (
+                                            <motion.div
+                                                initial={{ width: 0, opacity: 0, marginLeft: 0 }}
+                                                animate={{ width: "auto", opacity: 1, marginLeft: 12 }}
+                                                exit={{ width: 0, opacity: 0, marginLeft: 0 }}
+                                                className="overflow-hidden"
+                                            >
+                                                <GradientMenu
+                                                    onPhotoUpload={handleImageUpload}
+                                                    onPdfUpload={handlePdfUpload}
+                                                    onWebSearch={handleWebSearch}
+                                                    hasPhoto={currentHasPhoto}
+                                                    hasPdf={currentHasPdf}
+                                                />
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+
                                 <Textarea
                                     ref={textareaRef}
                                     value={value}
@@ -996,6 +1031,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                                     onChange={(e) => {
                                         setValue(e.target.value);
                                         adjustHeight();
+                                        if (isActionsOpen) setIsActionsOpen(false); // Auto-collapse tools when typing
                                     }}
                                     onKeyDown={handleKeyDown}
                                     onFocus={() => setInputFocused(true)}
@@ -1047,31 +1083,17 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                             </AnimatePresence>
                         </motion.div>
 
-                        {/* Action Buttons OUTSIDE in Landing Mode, Integrated in Chat Mode */}
-                        {!isChatMode ? (
-                            <motion.div
+                        {/* Help Text / Status */}
+                        {!isChatMode && !isTyping && (
+                            <motion.div 
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
-                                className="flex justify-center"
+                                className="text-center pb-2"
                             >
-                                <GradientMenu
-                                    onPhotoUpload={handleImageUpload}
-                                    onPdfUpload={handlePdfUpload}
-                                    onWebSearch={handleWebSearch}
-                                    hasPhoto={currentHasPhoto}
-                                    hasPdf={currentHasPdf}
-                                />
+                                <span className="text-[9px] uppercase tracking-[0.3em] font-bold text-white/20">
+                                    Click the <span className="text-violet-400/50">+</span> to attach photos or PDFs
+                                </span>
                             </motion.div>
-                        ) : (
-                            <div className="flex gap-2 opacity-60 hover:opacity-100 transition-opacity">
-                                <GradientMenu
-                                    onPhotoUpload={handleImageUpload}
-                                    onPdfUpload={handlePdfUpload}
-                                    onWebSearch={handleWebSearch}
-                                    hasPhoto={currentHasPhoto}
-                                    hasPdf={currentHasPdf}
-                                />
-                            </div>
                         )}
                     </div>
                 </div>
