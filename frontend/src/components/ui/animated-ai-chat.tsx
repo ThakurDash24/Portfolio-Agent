@@ -724,7 +724,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                 <nav className="w-full flex items-center justify-between relative">
                     
                     {/* Left: Navigation Controls */}
-                    <div className="flex items-center gap-3 z-10">
+                    <div className="flex items-center gap-2 sm:gap-3 z-10">
                         {!guestMode && (
                             <>
                                 <button 
@@ -745,8 +745,8 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                             </>
                         )}
                         {guestMode && (
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200/80 text-[10px] uppercase font-bold tracking-widest animate-pulse">
-                                <Sparkles className="w-3 h-3" /> Guest Mode
+                            <div className="flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200/80 text-[10px] uppercase font-bold tracking-widest animate-pulse">
+                                <Sparkles className="w-3 h-3" /> <span className="hidden sm:inline">Guest Mode</span>
                             </div>
                         )}
                     </div>
@@ -771,20 +771,22 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                     </div>
 
                     {/* Right: Save Session Actions & Account */}
-                    <div className="flex justify-end items-center gap-4 z-10">
+                    <div className="flex justify-end items-center gap-2 sm:gap-4 z-10">
                         {currentThreadId && !guestMode && (
                             <motion.button
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
                                 onClick={handleSaveSession}
                                 className={cn(
-                                    "px-5 py-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-500 pointer-events-auto",
+                                    "px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-500 pointer-events-auto flex items-center gap-2",
                                     isSaved 
                                         ? "bg-green-500/20 border-green-500/50 text-green-400 shadow-[0_0_20px_rgba(34,197,94,0.15)]" 
                                         : "bg-white/5 border-white/10 text-white/40 hover:border-violet-500/50 hover:text-white hover:bg-violet-500/10"
                                 )}
                             >
-                                {isSaved ? "Saved ✓" : "Save Chat"}
+                                <Sparkles className={cn("w-3.5 h-3.5", isSaved ? "animate-pulse" : "")} />
+                                <span className="hidden sm:inline">{isSaved ? "Saved" : "Save Chat"}</span>
+                                {isSaved && <span className="sm:hidden">✓</span>}
                             </motion.button>
                         )}
                         
@@ -799,7 +801,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                                 className="p-2 rounded-lg hover:bg-red-500/20 transition-all duration-300 text-white/40 hover:text-red-400 group focus:outline-none flex items-center gap-2"
                                 title={guestMode ? "Login" : "Sign Out"}
                             >
-                                <span className="text-[10px] sm:hidden font-bold uppercase tracking-widest opacity-60">{guestMode ? "Login" : "Exit"}</span>
+                                <span className="text-[10px] hidden sm:block font-bold uppercase tracking-widest opacity-60">{guestMode ? "Login" : "Exit"}</span>
                                 <LogOut className="w-4 h-4 group-hover:scale-110 transition-transform" />
                             </button>
                         </div>

@@ -377,7 +377,7 @@ function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-2">
+    <div className="min-h-screen grid lg:grid-cols-2 overflow-y-auto">
       {/* Left Content Section */}
       <div className="relative hidden lg:flex flex-col justify-between bg-gradient-to-br from-zinc-900 via-zinc-950 to-black p-12 text-zinc-50">
         <div className="relative z-20">
@@ -610,7 +610,7 @@ function LoginPage() {
           ) : (
             <>
           {/* Mobile Logo */}
-          <div className="lg:hidden flex items-center justify-center gap-2 text-lg font-semibold mb-12">
+          <div className="lg:hidden flex items-center justify-center gap-2 text-lg font-semibold mb-6 sm:mb-12">
             <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center">
               <Sparkles className="size-4 text-primary" />
             </div>
@@ -618,7 +618,7 @@ function LoginPage() {
           </div>
 
           {/* Header */}
-          <div className="text-center mb-10">
+          <div className="text-center mb-6 sm:mb-10">
             <h1 className="text-3xl font-bold tracking-tight mb-2">
               {isSignUp ? "Create an account" : "Welcome back!"}
             </h1>
@@ -720,7 +720,7 @@ function LoginPage() {
           </div>
 
           {/* Sign Up Link */}
-          <div className="text-center text-sm text-muted-foreground mt-8">
+          <div className="text-center text-sm text-muted-foreground mt-6 sm:mt-8">
             {isSignUp ? "Already have an account? " : "Don't have an account? "}
             <button
               type="button"
