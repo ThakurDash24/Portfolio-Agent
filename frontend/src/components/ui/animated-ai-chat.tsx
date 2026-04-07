@@ -617,6 +617,14 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
         setCurrentHasPhoto(false);
     };
 
+    // 🚀 Force fresh session for guests on mounting/reload
+    useEffect(() => {
+        if (guestMode) {
+            handleNewChat();
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     const handleSaveSession = async () => {
         if (guestMode || !currentThreadId) return;
         try {
@@ -719,8 +727,8 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
             <header className={cn(
                 "fixed top-0 left-0 right-0 z-50 transition-all duration-500 ease-in-out px-4 md:px-6 w-full flex justify-center",
                 isHeaderScrolled 
-                    ? "py-3 bg-black/40 backdrop-blur-xl border-b border-white/5 shadow-2xl shadow-black/50" 
-                    : "py-6 md:py-8 bg-transparent backdrop-blur-none border-b-0"
+                    ? "py-2 bg-black/40 backdrop-blur-xl border-b border-white/5 shadow-2xl shadow-black/50" 
+                    : "py-4 md:py-8 bg-transparent backdrop-blur-none border-b-0"
             )}>
                 <nav className="w-full flex items-center justify-between relative">
                     
@@ -746,14 +754,18 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                             </>
                         )}
                         {guestMode && (
-                            <div className="flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200/80 text-[10px] uppercase font-bold tracking-widest animate-pulse">
-                                <Sparkles className="w-3 h-3" /> <span className="hidden sm:inline">Guest Mode</span>
-                            </div>
+                            <button 
+                                onClick={() => navigate('/')}
+                                className="flex items-center gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-white/5 border border-white/10 text-white/70 text-[9px] sm:text-[10px] uppercase font-bold tracking-tighter sm:tracking-widest hover:bg-green-500/20 hover:border-green-500/50 hover:text-green-400 transition-all duration-500 pointer-events-auto shadow-lg group"
+                            >
+                                <Sparkles className="w-3 sm:w-3.5 h-3 sm:h-3.5 group-hover:animate-pulse" />
+                                <span>Take the experience</span>
+                            </button>
                         )}
                     </div>
 
-                    {/* Highly Precise Center: Branding Logo - Hidden on mobile to avoid overlap */}
-                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none hidden md:block">
+                    {/* Highly Precise Center: Branding Logo - Hidden on tiny screens */}
+                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
                         <motion.div 
                             initial={{ opacity: 0, y: -10 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -762,7 +774,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                         >
                             <div className="relative px-4 py-1.5 rounded-2xl pointer-events-auto cursor-pointer">
                                 <span className={cn(
-                                    "relative z-10 text-3xl font-playfair font-bold tracking-tighter transition-all duration-500",
+                                    "relative z-10 text-xl sm:text-3xl font-playfair font-bold tracking-tighter transition-all duration-500",
                                     isHeaderScrolled ? "scale-90 opacity-90" : "scale-100 opacity-100"
                                 )}>
                                     Laven<span className="text-violet-400">.</span>
@@ -799,10 +811,17 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                             </div>
                             <button 
                                 onClick={handleSignOut}
-                                className="p-2 rounded-lg hover:bg-red-500/20 transition-all duration-300 text-white/40 hover:text-red-400 group focus:outline-none flex items-center gap-2"
+                                className={cn(
+                                    "p-2 rounded-lg transition-all duration-500 group focus:outline-none flex items-center gap-2",
+                                    guestMode 
+                                        ? "bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 text-green-400/80 hover:text-green-400 hover:border-green-500/50" 
+                                        : "hover:bg-red-500/20 text-white/40 hover:text-red-400"
+                                )}
                                 title={guestMode ? "Login" : "Sign Out"}
                             >
-                                <span className="text-[10px] hidden sm:block font-bold uppercase tracking-widest opacity-60">{guestMode ? "Login" : "Exit"}</span>
+                                <span className="text-[10px] hidden sm:block font-bold uppercase tracking-widest opacity-60">
+                                    {guestMode ? "Login" : "Exit"}
+                                </span>
                                 <LogOut className="w-4 h-4 group-hover:scale-110 transition-transform" />
                             </button>
                         </div>
@@ -898,7 +917,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                     onScroll={handleScroll}
                     className={cn(
                         "w-full custom-scrollbar transition-all duration-500",
-                        isChatMode ? "flex-1 overflow-y-auto px-4 pt-24 pb-[30vh] relative z-1" : "h-0 overflow-hidden"
+                        isChatMode ? "flex-1 overflow-y-auto px-4 pt-16 sm:pt-24 pb-[35vh] sm:pb-[30vh] relative z-1" : "h-0 overflow-hidden"
                     )}
                 >
                     <div className="max-w-5xl mx-auto flex flex-col gap-10">
@@ -930,10 +949,10 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                         animate={{ opacity: 1, y: 0 }}
                         className="flex flex-col items-center mb-12"
                     >
-                        <h1 className="text-3xl sm:text-5xl font-medium tracking-tight bg-clip-text text-transparent bg-[linear-gradient(110deg,#ffffffad,45%,#ffffff,55%,#ffffffad)] bg-[length:200%_100%] animate-text-shimmer mb-4 text-center px-4">
+                        <h1 className="text-2xl sm:text-5xl font-medium tracking-tight bg-clip-text text-transparent bg-[linear-gradient(110deg,#ffffffad,45%,#ffffff,55%,#ffffffad)] bg-[length:200%_100%] animate-text-shimmer mb-4 text-center px-4">
                             How can I help today?
                         </h1>
-                        <p className="text-lg sm:text-xl text-white/50 font-light italic">
+                        <p className="text-base sm:text-xl text-white/50 font-light italic">
                             Hey, Laven is here ;)
                         </p>
                     </motion.div>
@@ -941,13 +960,13 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
 
                 <div className={cn(
                     "w-full px-4 transition-all duration-700 z-10 relative",
-                    isChatMode ? "fixed bottom-0 left-0 right-0 py-6 sm:py-10 bg-gradient-to-t from-black via-black/95 to-transparent" : "max-w-5xl"
+                    isChatMode ? "fixed bottom-0 left-0 right-0 py-4 sm:py-10 bg-gradient-to-t from-black via-black/95 to-transparent" : "max-w-5xl"
                 )}>
                     <div className="max-w-5xl mx-auto flex flex-col gap-6">
                         <motion.div
                             layout
                             className={cn(
-                                "relative backdrop-blur-3xl rounded-3xl border transition-all duration-500",
+                                "relative backdrop-blur-3xl rounded-2xl border transition-all duration-500",
                                 (value.length > 0 || inputFocused)
                                     ? "bg-white/[0.12] border-white/30 shadow-[0_0_50px_rgba(255,255,255,0.15)]"
                                     : "bg-white/[0.08] border-white/10 shadow-2xl"
@@ -989,14 +1008,14 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                                 )}
                             </AnimatePresence>
 
-                            <div className="min-h-[42px] relative px-4 py-1 flex items-center gap-1 sm:gap-4">
+                            <div className="min-h-[34px] relative px-3 py-1 flex items-center gap-1 sm:gap-4">
                                 {/* Compact Tools Trigger */}
                                 <div className="flex items-center">
                                     <motion.button
                                         type="button"
                                         onClick={() => setIsActionsOpen(!isActionsOpen)}
                                         className={cn(
-                                            "p-3 rounded-2xl transition-all duration-300 bg-white/5 border border-white/10 hover:bg-white/10",
+                                            "p-1.5 rounded-xl transition-all duration-300 bg-white/5 border border-white/10 hover:bg-white/10",
                                             isActionsOpen ? "text-violet-400 bg-violet-500/10 border-violet-500/50" : "text-white/40 hover:text-white"
                                         )}
                                         title="Tools"
@@ -1038,7 +1057,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                                     onBlur={() => setInputFocused(false)}
                                     placeholder={isTyping ? "Please wait..." : "Message Laven..."}
                                     containerClassName="w-full flex-1"
-                                    className="flex-1 bg-transparent border-none focus-visible:ring-0 text-white placeholder:text-white/20 resize-none py-1.5 text-base custom-scrollbar min-h-[30px]"
+                                    className="flex-1 bg-transparent border-none focus-visible:ring-0 text-white placeholder:text-white/20 resize-none py-1 text-sm custom-scrollbar min-h-[24px] leading-tight"
                                     style={{ overflow: "hidden" }}
                                     showRing={false}
                                 />
@@ -1049,7 +1068,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                                     whileTap={{ scale: 0.9 }}
                                     disabled={isTyping || !value.trim()}
                                     className={cn(
-                                        "p-3 rounded-2xl transition-all duration-300",
+                                        "p-1.5 rounded-xl transition-all duration-300",
                                         value.trim()
                                             ? "bg-violet-500 text-white shadow-[0_0_30px_rgba(139,92,246,0.6)]"
                                             : "bg-white/5 text-white/20 pointer-events-none"

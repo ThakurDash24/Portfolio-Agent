@@ -210,9 +210,10 @@ def get_session(thread_id: str, user_id: str):
     if bm25_retriever is None:
         try:
             guest_data = [
-                "Biswajit: A fellow developer and friend of Laven.",
+                "Biswajit: A contact of Laven, a fellow developer and friend.",
                 "Laven: The owner of this portfolio and a highly capable AI builder.",
-                "Thakur Dash: A Machine Learning Engineer with experience in GenAI and backend systems."
+                "Thakur Dash: A Machine Learning Engineer with experience in GenAI and backend systems.",
+                "Current User/Visitor: An anonymous guest or explorer currently visiting the portfolio."
             ]
             import json
             if os.path.exists("all_models.json"):
