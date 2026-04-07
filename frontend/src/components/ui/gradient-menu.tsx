@@ -16,6 +16,15 @@ export default function GradientMenu({
   hasPhoto = false,
   hasPdf = false
 }: GradientMenuProps) {
+  const [isMobile, setIsMobile] = React.useState(false);
+
+  React.useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   const menuItems = [
     { 
       title: 'Photo', 
@@ -41,9 +50,10 @@ export default function GradientMenu({
       gradientFrom: '#2dd4bf', 
       gradientTo: '#0ea5e9',
       onClick: onWebSearch,
-      disabled: false
+      disabled: false,
+      isBrowser: true
     }
-  ];
+  ].filter(item => !(item.isBrowser && isMobile));
 
   return (
     <div className="flex items-center">

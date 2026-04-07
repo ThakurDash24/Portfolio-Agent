@@ -189,26 +189,38 @@ export function AnimatedAIChat() {
         };
     };
 
+    const [isMobile, setIsMobile] = useState(false);
+
+    useEffect(() => {
+        const checkMobile = () => setIsMobile(window.innerWidth < 768);
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
     const commandSuggestions = useMemo<CommandSuggestion[]>(() => [
         {
             icon: <Search className="w-4 h-4" />,
             label: "Browser Search",
             description: "Search live via visible Chrome",
-            prefix: "/browser"
+            prefix: "/browser",
+            id: "browser"
         },
         {
             icon: <ImageIcon className="w-4 h-4" />,
             label: "Clone UI",
             description: "Generate a UI from a screenshot",
-            prefix: "/clone"
+            prefix: "/clone",
+            id: "clone"
         },
         {
             icon: <MonitorIcon className="w-4 h-4" />,
             label: "Create Page",
             description: "Generate a new web page",
-            prefix: "/page"
+            prefix: "/page",
+            id: "page"
         },
-    ], []);
+    ].filter(cmd => !(cmd.id === 'browser' && isMobile)), [isMobile]);
 
     useEffect(() => {
         if (value.startsWith('/') && !value.includes(' ')) {

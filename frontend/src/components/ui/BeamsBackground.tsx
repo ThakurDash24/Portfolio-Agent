@@ -52,31 +52,47 @@ export function BeamsBackground({ children, className, active = true }: BeamsBac
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const updateCanvasSize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = window.innerWidth * dpr;
-      canvas.height = window.innerHeight * dpr;
-      ctx.scale(dpr, dpr);
-      
+    // 🚀 Persistence Fix: Initialize beams ONLY once if they don't exist
+    if (beamsRef.current.length === 0) {
       const isMobile = window.innerWidth < 768;
-      beamsRef.current = Array.from({ length: isMobile ? 8 : 12 }, () => 
+      beamsRef.current = Array.from({ length: isMobile ? 10 : 15 }, () => 
         createBeam(window.innerWidth, window.innerHeight)
       );
+    }
+
+    const updateCanvasSize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // Use client dimensions to avoid scrollbar jitter
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      
+      if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform before scaling
+        ctx.scale(dpr, dpr);
+      }
     };
 
     updateCanvasSize();
     window.addEventListener("resize", updateCanvasSize);
 
     const animate = () => {
-      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      if (!ctx || !canvas) return;
+      
+      // Use raw width/height to bypass any current scales when clearing
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
       
       beamsRef.current.forEach((beam) => {
         beam.y -= beam.speed;
         beam.pulse += beam.pulseSpeed;
         
-        // Reset beam position when it goes off screen
-        if (beam.y + beam.length < -200) {
-          beam.y = window.innerHeight + 100;
+        // Loop vertically
+        if (beam.y + beam.length < -400) {
+          beam.y = window.innerHeight + 200;
         }
         
         ctx.save();
