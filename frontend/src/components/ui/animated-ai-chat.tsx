@@ -835,12 +835,7 @@ export function AnimatedAIChat() {
                 )}
             </AnimatePresence>
 
-            {/* Luxury Background Orbs */}
-            <div className="luxury-bg-container">
-                <div className="luxury-orb orb-1"></div>
-                <div className="luxury-orb orb-2"></div>
-                <div className="luxury-orb orb-3"></div>
-            </div>
+            {/* Background Beams are handled by the parent wrapper in App.tsx */}
 
             {/* Main Layout Container */}
             <div className={cn(

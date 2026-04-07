@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AnimatedAIChat } from './components/ui/animated-ai-chat';
 import { Component as LoginPage } from './components/ui/animated-characters-login-page';
 import { HeroGeometric as WelcomePage } from './components/ui/shape-landing-hero';
+import { BeamsBackground } from './components/ui/BeamsBackground';
 
 function App() {
   return (
@@ -10,9 +11,9 @@ function App() {
       <Routes>
         <Route path="/" element={<WelcomePage />} />
         <Route path="/chat" element={
-          <div className="lab-bg relative min-h-screen">
+          <BeamsBackground>
             <AnimatedAIChat />
-          </div>
+          </BeamsBackground>
         } />
         <Route path="/login" element={<LoginPage />} />
       </Routes>

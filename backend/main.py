@@ -110,57 +110,80 @@ def save_sessions_to_db():
                 print(f"[Supabase] chat_messages insert failed for {tid}: {e}")
 
 
-def load_sessions_from_db():
-    """Restore saved sessions from Supabase on startup."""
+def restore_thread_into_memory(thread_id: str, user_id: Optional[str] = None):
+    """
+    Attempt to restore a specific thread into _sessions from Supabase.
+    Useful for threads that exist in DB but were wiped from memory on reload.
+    If user_id is provided, it verifies ownership.
+    """
     if not _SUPABASE_ENABLED:
-        return
+        return None
 
     try:
-        threads_res = _sb.table("chat_threads").select("*").eq("is_saved", True).execute()
-    except Exception as e:
-        print(f"[Supabase] Failed to load threads: {e}")
-        return
+        # Check thread table
+        query = _sb.table("chat_threads").select("*").eq("id", thread_id)
+        if user_id is not None:
+            query = query.eq("user_id", user_id)
+        
+        t_res = query.execute()
+        if not t_res.data:
+            return None
+        row = t_res.data[0]
 
-    for row in (threads_res.data or []):
-        tid = row["id"]
+        # Load messages
+        msgs_res = _sb.table("chat_messages").select("*").eq("thread_id", thread_id).order("created_at").execute()
+        raw_messages = msgs_res.data or []
 
-        # Load messages for this thread
-        try:
-            msgs_res = _sb.table("chat_messages").select("*").eq("thread_id", tid).order("created_at").execute()
-            raw_messages = msgs_res.data or []
-        except Exception as e:
-            print(f"[Supabase] Failed to load messages for {tid}: {e}")
-            raw_messages = []
-
+        # Re-initialize agent
         agent = BasicAgent()
-        agent.threads[tid] = {"messages": [], "title": row.get("title", "Chat")}
+        agent.threads[thread_id] = {"messages": [], "title": row.get("title", "Chat")}
         for m in raw_messages:
-            agent.threads[tid]["messages"].append({
+            agent.threads[thread_id]["messages"].append({
                 "role": m.get("role", "assistant"),
                 "content": m.get("content", ""),
             })
 
-        _sessions[tid] = {
+        _sessions[thread_id] = {
             "agent": agent,
             "title": row.get("title", "Chat"),
-            "saved": True,
+            "saved": row.get("is_saved", False),
         }
-        agent.current_thread_id = tid
-        agent.is_saved = True
+        agent.current_thread_id = thread_id
+        agent.is_saved = row.get("is_saved", False)
 
-        # Step 4.2 — Restore vector DB from documents table if PDF was previously uploaded
+        # Restore PDF context if exists
         try:
-            docs_res = _sb.table("documents").select("metadata").eq("thread_id", tid).limit(1).execute()
+            docs_res = _sb.table("documents").select("metadata").eq("thread_id", thread_id).limit(1).execute()
             if docs_res.data:
                 file_url = docs_res.data[0]["metadata"]["file_url"]
-                print(f"[Supabase] Restoring PDF vector DB for thread {tid} from {file_url}")
                 from tools import init_pdf_vectorstore
                 agent.vector_db = init_pdf_vectorstore(file_url)
                 agent.has_pdf = True
         except Exception as e:
-            print(f"[Supabase] Document load/restore failed for {tid}: {e}")
+            print(f"[Supabase] Lazy-restore PDF failed for {thread_id}: {e}")
 
-    print(f"[Supabase] Loaded {len(threads_res.data or [])} saved thread(s) from DB.")
+        print(f"[Supabase] Successfully restored thread {thread_id} to memory")
+        return _sessions[thread_id]
+
+    except Exception as e:
+        print(f"[Supabase] Restore failed for {thread_id}: {e}")
+        return None
+
+
+def load_sessions_from_db():
+    """Restore all previously saved sessions from Supabase on startup."""
+    if not _SUPABASE_ENABLED:
+        return
+
+    try:
+        threads_res = _sb.table("chat_threads").select("id, user_id").eq("is_saved", True).execute()
+        count = 0
+        for row in (threads_res.data or []):
+            if restore_thread_into_memory(row["id"], row.get("user_id")):
+                count += 1
+        print(f"[Supabase] Loaded {count} saved thread(s) from DB on startup.")
+    except Exception as e:
+        print(f"[Supabase] Failed to load threads on startup: {e}")
 
 
 # Backwards-compat alias so existing call sites keep working
@@ -215,6 +238,12 @@ def get_session(thread_id: str, user_id: str):
             print(f"[Supabase] Ownership check failed: {e}")
 
     if thread_id not in _sessions:
+        # 🔹 Lazy Restore: try finding it in Supabase first
+        restored = restore_thread_into_memory(thread_id, user_id)
+        if restored:
+            return restored
+
+        # Otherwise, start a fresh one
         _sessions[thread_id] = {
             "agent": BasicAgent(),
             "title": "New Chat",
@@ -478,10 +507,8 @@ def get_thread(thread_id: str, user_id: str = Depends(get_current_user)):
         except Exception as e:
             print(f"[Supabase] Thread ownership check failed: {e}")
 
-    if thread_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Thread not found in memory. It may not be loaded yet.")
-
-    session = _sessions[thread_id]
+    # Use get_session to leverage lazy-restore logic
+    session = get_session(thread_id, user_id)
     agent = session["agent"]
 
     return {
@@ -507,10 +534,11 @@ def save_thread(thread_id: str, user_id: str = Depends(get_current_user)):
         except Exception as e:
             print(f"[Supabase] Ownership check failed: {e}")
 
-    if thread_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Thread not found in memory")
-    _sessions[thread_id]["saved"] = True
-    _sessions[thread_id]["agent"].is_saved = True
+    # 🔹 Use get_session to ensure it's in memory (lazy-restore if needed)
+    session = get_session(thread_id, user_id)
+    
+    session["saved"] = True
+    session["agent"].is_saved = True
 
     if _SUPABASE_ENABLED:
         try:
