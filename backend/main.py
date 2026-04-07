@@ -191,8 +191,9 @@ def save_sessions_to_disk():
     save_sessions_to_db()
 
 
-# Load on startup
-load_sessions_from_db()
+# 🔹 Removed for Production: load_sessions_from_db() is too heavy for startup on cloud platforms.
+# Sessions will now be re-hydrated lazily via get_session() when a user actually requests a thread.
+# load_sessions_from_db()
 
 def get_session(thread_id: str, user_id: str):
     """Return the in-memory session for thread_id, verifying ownership via Supabase."""
