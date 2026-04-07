@@ -12,6 +12,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile, Depends
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from auth import get_current_user, get_optional_user
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -304,14 +306,40 @@ class ThreadTitleUpdate(BaseModel):
     title: str
 
 
+# Define the path to the frontend build directory
+_FRONTEND_BUILD_DIR = _BACKEND_DIR.parent / "frontend" / "build"
+
 @app.get("/")
 def root():
-    return {"message": "Agent API is running"}
+    """Serve the frontend index.html as the root page."""
+    index_file = _FRONTEND_BUILD_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return {"message": "Agent API is running (Frontend build not found)"}
 
 
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+# Serve other static files (like /favicon.ico, /manifest.json)
+@app.get("/manifest.json")
+async def get_manifest():
+    return FileResponse(_FRONTEND_BUILD_DIR / "manifest.json")
+
+@app.get("/favicon.ico")
+async def get_favicon():
+    return FileResponse(_FRONTEND_BUILD_DIR / "favicon.ico")
+
+@app.get("/logo192.png")
+async def get_logo192():
+    return FileResponse(_FRONTEND_BUILD_DIR / "logo192.png")
+
+# Mount the static assets directory for CSS/JS
+if (_FRONTEND_BUILD_DIR / "static").exists():
+    app.mount("/static", StaticFiles(directory=_FRONTEND_BUILD_DIR / "static"), name="static")
+
+
 
 
 @app.post("/upload/image", response_model=ImageUploadResponse)
@@ -678,3 +706,17 @@ async def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+# SPA Fallback: Redirect all other non-API routes to index.html (MUST BE AT THE END)
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    # Skip if it's an API route (safety check)
+    api_routes = ["chat", "threads", "upload", "websearch", "health", "login", "save_thread", "thread"]
+    if any(full_path.startswith(route) for route in api_routes):
+        # Let FastAPI return 404 naturally for missing API endpoints
+        raise HTTPException(status_code=404, detail="API route not found")
+        
+    index_file = _FRONTEND_BUILD_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    raise HTTPException(status_code=404, detail="Not Found")

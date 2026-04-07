@@ -188,12 +188,23 @@ function HeroGeometric({
                         variants={fadeUpVariants}
                         initial="hidden"
                         animate="visible"
-                        className="flex justify-center"
+                        className="flex flex-col sm:flex-row justify-center gap-4"
                     >
                         <MorphButton 
                             label="Login / Sign Up" 
                             onClick={() => navigate('/login')} 
                         />
+                        <button 
+                            onClick={() => navigate('/guest_chat')}
+                            className={cn(
+                                "px-8 py-4 rounded-2xl border-2 border-white/5 bg-white/5",
+                                "text-white/60 font-medium tracking-wide transition-all duration-300",
+                                "hover:bg-white/10 hover:text-white hover:border-white/20",
+                                "active:scale-95"
+                            )}
+                        >
+                            Try as Guest
+                        </button>
                     </motion.div>
                 </div>
             </div>
