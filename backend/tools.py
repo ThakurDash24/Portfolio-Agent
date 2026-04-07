@@ -1,32 +1,23 @@
-from langchain_community.retrievers import BM25Retriever
 from langchain_core.tools import tool
-import helium
 import time
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 import urllib.parse
 import random
 import os
-from huggingface_hub import list_models
-from pydantic import BaseModel, Field
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from pydantic import BaseModel, Field
-
-bm25_retriever = None
-
-from langchain_community.retrievers import BM25Retriever
 from pydantic import BaseModel, Field
 
 # ------------------ GLOBAL RETRIEVERS ------------------
+bm25_retriever = None
 guest_retriever = None
 
 # ------------------ VECTOR DB AND STORE FOR PDFS -----------
 # Note: vector_db is now managed per-session/agent to ensure isolation.
 
 def init_pdf_vectorstore(file_path: str):
+    from langchain_community.document_loaders import PyPDFLoader
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_community.vectorstores import Chroma
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+
     print(f"LOADING PDF: {file_path}")
     loader = PyPDFLoader(file_path)
     docs = loader.load()
@@ -113,6 +104,7 @@ def pdf_search_tool(query: str) -> str:
 
 # ------------------ INIT ------------------
 def init_guest_retriever(docs):
+    from langchain_community.retrievers import BM25Retriever
     global guest_retriever
     guest_retriever = BM25Retriever.from_documents(docs)
 
@@ -133,6 +125,7 @@ def guest_info_tool(query: str) -> str:
 
 # ------------------ INIT ------------------
 def init_retriever(docs_list):
+    from langchain_community.retrievers import BM25Retriever
     global bm25_retriever
     bm25_retriever = BM25Retriever.from_documents(docs_list)
 
@@ -199,6 +192,9 @@ def browser_search_tool(query: str) -> str:
     Handles Google CAPTCHAs by falling back to DuckDuckGo.
     (Optimized Extraction)
     """
+    import helium
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
     try:
         options = Options()
         # Avoid common issues with automated browsers
@@ -341,6 +337,8 @@ def browser_click_tool(query: str) -> str:
     """Click on a piece of text, button or link in the Chrome browser. 
     Pass the text you want to click.
     """
+    import helium
+    from selenium.webdriver.common.by import By
     try:
         if not helium.get_driver():
             return "No browser window open. Run a search first."
@@ -379,6 +377,7 @@ def browser_click_tool(query: str) -> str:
 @tool
 def browser_back_tool() -> str:
     """Go back to the previous page in the Chrome browser session."""
+    import helium
     try:
         if not helium.get_driver():
             return "No browser window open."
@@ -455,6 +454,7 @@ weather_info_tool = get_weather_info
 @tool(args_schema=HubStatsQuery)
 def get_hub_stats(author: str) -> str:
     """Use when asked about HuggingFace models or authors."""
+    from huggingface_hub import list_models
     try:
         models = list(list_models(author=author, sort="downloads", direction=-1, limit=1))
         if not models:

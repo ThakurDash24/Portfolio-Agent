@@ -16,13 +16,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
+# share/python-wheels/ is already covered or not needed
 *.egg-info/
 .installed.cfg
 *.egg

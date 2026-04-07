@@ -144,6 +144,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 Textarea.displayName = "Textarea"
 
 export function AnimatedAIChat() {
+    const apiBaseUrl = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
     const [messages, setMessages] = useState<Message[]>([]);
     const [value, setValue] = useState("");
     const [attachments, setAttachments] = useState<string[]>([]);
@@ -341,12 +342,12 @@ export function AnimatedAIChat() {
             // If no thread exists, create one BEFORE sending the message
             if (!activeThreadId) {
                 const headers = await authHeaders();
-                const threadResponse = await fetch("http://127.0.0.1:8000/threads/new", {
+                const response = await fetch(`${apiBaseUrl}/threads/new`, {
                     method: "POST",
                     headers,
                 });
-                if (!threadResponse.ok) throw new Error("Failed to create thread");
-                const threadData = await threadResponse.json();
+                if (!response.ok) throw new Error("Failed to create thread");
+                const threadData = await response.json();
                 activeThreadId = threadData.thread_id;
                 setCurrentThreadId(activeThreadId);
             }
@@ -365,7 +366,7 @@ export function AnimatedAIChat() {
             }
 
             const chatHeaders = await authHeaders();
-            const response = await fetch("http://127.0.0.1:8000/chat", {
+            const response = await fetch(`${apiBaseUrl}/chat`, {
                 method: "POST",
                 headers: chatHeaders,
                 body: JSON.stringify({
@@ -461,7 +462,7 @@ export function AnimatedAIChat() {
                 setStatusLabel("Uploading image...");
                 setIsTyping(true);
                 const imageToken = await getAccessToken();
-                const res = await fetch(`http://127.0.0.1:8000/upload/image${currentThreadId ? `?thread_id=${currentThreadId}` : ''}`, {
+                const res = await fetch(`${apiBaseUrl}/upload/image${currentThreadId ? `?thread_id=${currentThreadId}` : ''}`, {
                     method: "POST",
                     headers: imageToken ? { 'Authorization': `Bearer ${imageToken}` } : {},
                     body: formData,
@@ -482,11 +483,11 @@ export function AnimatedAIChat() {
             if (!activeThreadId) {
                 try {
                     const headers = await authHeaders();
-                    const threadResponse = await fetch("http://127.0.0.1:8000/threads/new", {
+                    const response = await fetch(`${apiBaseUrl}/threads/new`, {
                         method: "POST",
                         headers,
                     });
-                    const threadData = await threadResponse.json();
+                    const threadData = await response.json();
                     activeThreadId = threadData.thread_id;
                     setCurrentThreadId(activeThreadId);
                 } catch (err) {
@@ -501,7 +502,7 @@ export function AnimatedAIChat() {
                 setStatusLabel("Indexing PDF for this session...");
                 setIsTyping(true);
                 const pdfToken = await getAccessToken();
-                const res = await fetch(`http://127.0.0.1:8000/upload/pdf?thread_id=${activeThreadId}`, {
+                const res = await fetch(`${apiBaseUrl}/upload/pdf?thread_id=${activeThreadId}`, {
                     method: "POST",
                     headers: pdfToken ? { 'Authorization': `Bearer ${pdfToken}` } : {},
                     body: formData,
@@ -549,7 +550,7 @@ export function AnimatedAIChat() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`,
             };
-            const response = await fetch("http://127.0.0.1:8000/threads", { headers });
+            const response = await fetch(`${apiBaseUrl}/threads`, { headers });
             if (!response.ok) {
                 console.warn('fetchThreads HTTP error:', response.status);
                 setThreads([]);
@@ -587,7 +588,7 @@ export function AnimatedAIChat() {
         if (!currentThreadId) return;
         try {
             const headers = await authHeaders();
-            const response = await fetch(`http://127.0.0.1:8000/save_thread/${currentThreadId}`, {
+            const response = await fetch(`${apiBaseUrl}/save_thread/${currentThreadId}`, {
                 method: "POST",
                 headers,
             });
@@ -604,7 +605,7 @@ export function AnimatedAIChat() {
     const loadThread = async (id: string) => {
         try {
             const headers = await authHeaders();
-            const response = await fetch(`http://127.0.0.1:8000/thread/${id}`, { headers });
+            const response = await fetch(`${apiBaseUrl}/thread/${id}`, { headers });
             const data = await response.json();
             // Map formatted messages back to Message objects
             const loadedMessages: Message[] = data.messages.map((m: any) => {
@@ -636,7 +637,7 @@ export function AnimatedAIChat() {
         e.stopPropagation();
         try {
             const headers = await authHeaders();
-            await fetch(`http://127.0.0.1:8000/threads/${id}`, { method: 'DELETE', headers });
+            await fetch(`${apiBaseUrl}/threads/${id}`, { method: 'DELETE', headers });
             if (currentThreadId === id) handleNewChat();
             fetchThreads();
         } catch (e) {
@@ -657,7 +658,7 @@ export function AnimatedAIChat() {
         }
         try {
             const headers = await authHeaders();
-            await fetch(`http://127.0.0.1:8000/threads/${id}/title`, {
+            await fetch(`${apiBaseUrl}/threads/${id}/title`, {
                 method: "PUT",
                 headers,
                 body: JSON.stringify({ title: editingTitle.trim() }),

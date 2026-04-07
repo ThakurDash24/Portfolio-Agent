@@ -13,7 +13,6 @@ from tools import (
     read_file,
     pdf_search_logic
 )
-from litellm import completion
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 class BasicAgent:
@@ -309,6 +308,7 @@ class BasicAgent:
         ]
 
         try:
+            from litellm import completion
             if images:
                 model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
             else:
