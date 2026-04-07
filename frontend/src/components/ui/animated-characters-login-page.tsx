@@ -9,7 +9,7 @@ import { Button } from "./button";
 import { Input } from "./input";
 import { Label } from "./label";
 import { Checkbox } from "./checkbox";
-import { Eye, EyeOff, Mail, Sparkles } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Mail, Sparkles } from "lucide-react";
 import { SparklesCore } from "./sparkles";
 
 const SparklesBanner = React.memo(() => (
@@ -582,7 +582,18 @@ function LoginPage() {
       </div>
 
       {/* Right Login Section */}
-      <div className="flex items-center justify-center p-8 bg-background">
+      <div className="relative flex items-center justify-center p-8 bg-background">
+        {/* Minimal Back Button */}
+        <button
+          type="button"
+          onClick={() => navigate('/')}
+          className="absolute top-5 left-5 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors group"
+          aria-label="Back to home"
+        >
+          <ArrowLeft className="size-4 transition-transform group-hover:-translate-x-0.5" />
+          <span className="font-medium">Back</span>
+        </button>
+
         <div className="w-full max-w-[420px]">
           {isSubmittedSignUp ? (
             <div className="flex flex-col items-center justify-center space-y-6 text-center py-12 animate-in fade-in zoom-in duration-500">
