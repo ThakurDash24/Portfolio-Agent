@@ -730,61 +730,57 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                     ? "py-2 bg-black/40 backdrop-blur-xl border-b border-white/5 shadow-2xl shadow-black/50" 
                     : "py-4 md:py-8 bg-transparent backdrop-blur-none border-b-0"
             )}>
-                <nav className="w-full flex items-center justify-between relative">
+                <nav className="w-full grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                     
-                    {/* Left: Navigation Controls */}
-                    <div className="flex items-center gap-2 sm:gap-3 z-10">
+                    {/* Col 1 – Left: Navigation Controls */}
+                    <div className="flex items-center gap-1.5 sm:gap-2">
                         {!guestMode && (
                             <>
                                 <button 
                                     data-history-button
                                     onClick={() => setShowSidebar(!showSidebar)}
-                                    className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all duration-300 text-white/50 hover:text-white group pointer-events-auto"
+                                    className="p-2 sm:p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all duration-300 text-white/50 hover:text-white group pointer-events-auto"
                                     title="History"
                                 >
-                                    <Menu className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                                    <Menu className="w-4 sm:w-5 h-4 sm:h-5 group-hover:scale-110 transition-transform" />
                                 </button>
                                 <button 
                                     onClick={handleNewChat}
-                                    className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all duration-300 text-white/50 hover:text-white group pointer-events-auto"
+                                    className="p-2 sm:p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all duration-300 text-white/50 hover:text-white group pointer-events-auto"
                                     title="New Chat"
                                 >
-                                    <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                                    <Plus className="w-4 sm:w-5 h-4 sm:h-5 group-hover:scale-110 transition-transform" />
                                 </button>
                             </>
                         )}
                         {guestMode && (
                             <button 
                                 onClick={() => navigate('/')}
-                                className="flex items-center gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-white/5 border border-white/10 text-white/70 text-[9px] sm:text-[10px] uppercase font-bold tracking-tighter sm:tracking-widest hover:bg-green-500/20 hover:border-green-500/50 hover:text-green-400 transition-all duration-500 pointer-events-auto shadow-lg group"
+                                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-white/70 text-[8px] sm:text-[10px] uppercase font-bold tracking-tight hover:bg-green-500/20 hover:border-green-500/50 hover:text-green-400 transition-all duration-500 pointer-events-auto group whitespace-nowrap overflow-hidden"
                             >
-                                <Sparkles className="w-3 sm:w-3.5 h-3 sm:h-3.5 group-hover:animate-pulse" />
-                                <span>Take the experience</span>
+                                <Sparkles className="w-2.5 sm:w-3.5 h-2.5 sm:h-3.5 group-hover:animate-pulse flex-shrink-0" />
+                                <span className="truncate">Take the experience</span>
                             </button>
                         )}
                     </div>
 
-                    {/* Highly Precise Center: Branding Logo - Hidden on tiny screens */}
-                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                        <motion.div 
-                            initial={{ opacity: 0, y: -10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.8, ease: "easeOut" }}
-                            className="relative flex items-center"
-                        >
-                            <div className="relative px-4 py-1.5 rounded-2xl pointer-events-auto cursor-pointer">
-                                <span className={cn(
-                                    "relative z-10 text-xl sm:text-3xl font-playfair font-bold tracking-tighter transition-all duration-500",
-                                    isHeaderScrolled ? "scale-90 opacity-90" : "scale-100 opacity-100"
-                                )}>
-                                    Laven<span className="text-violet-400">.</span>
-                                </span>
-                            </div>
-                        </motion.div>
-                    </div>
+                    {/* Col 2 – Center: Branding Logo always perfectly centered in grid */}
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.8, ease: "easeOut" }}
+                        className="flex justify-center items-center"
+                    >
+                        <span className={cn(
+                            "text-lg sm:text-3xl font-playfair font-bold tracking-tighter transition-all duration-500 whitespace-nowrap",
+                            isHeaderScrolled ? "opacity-80" : "opacity-100"
+                        )}>
+                            Laven<span className="text-violet-500">.</span>
+                        </span>
+                    </motion.div>
 
-                    {/* Right: Save Session Actions & Account */}
-                    <div className="flex justify-end items-center gap-2 sm:gap-4 z-10">
+                    {/* Col 3 – Right: Save Session Actions & Account */}
+                    <div className="flex justify-end items-center gap-1.5 sm:gap-3">
                         {currentThreadId && !guestMode && (
                             <motion.button
                                 initial={{ opacity: 0, scale: 0.9 }}
@@ -804,25 +800,25 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                         )}
                         
                         {/* Persistent Account Section - Collaborative View on Mobile */}
-                        <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 px-2 sm:px-3 py-1.5 rounded-xl backdrop-blur-md pointer-events-auto shadow-lg">
-                            <div className="hidden sm:flex flex-col items-end pr-3 border-r border-white/10">
+                        <div className="flex items-center gap-1.5 sm:gap-3 bg-white/5 border border-white/10 px-1.5 sm:px-3 py-1.5 rounded-xl backdrop-blur-xl pointer-events-auto shadow-lg">
+                            <div className="hidden md:flex flex-col items-end pr-3 border-r border-white/10">
                                 <span className="text-[9px] text-white/40 uppercase tracking-widest font-bold">Account</span>
                                 <span className="text-xs font-medium text-white/80">{userEmail || 'User'}</span>
                             </div>
                             <button 
                                 onClick={handleSignOut}
                                 className={cn(
-                                    "p-2 rounded-lg transition-all duration-500 group focus:outline-none flex items-center gap-2",
+                                    "p-1.5 sm:p-2 rounded-lg transition-all duration-500 group focus:outline-none flex items-center gap-2",
                                     guestMode 
                                         ? "bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 text-green-400/80 hover:text-green-400 hover:border-green-500/50" 
                                         : "hover:bg-red-500/20 text-white/40 hover:text-red-400"
                                 )}
                                 title={guestMode ? "Login" : "Sign Out"}
                             >
-                                <span className="text-[10px] hidden sm:block font-bold uppercase tracking-widest opacity-60">
+                                <span className="text-[10px] hidden md:block font-bold uppercase tracking-widest opacity-60">
                                     {guestMode ? "Login" : "Exit"}
                                 </span>
-                                <LogOut className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                                <LogOut className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:scale-110 transition-transform" />
                             </button>
                         </div>
                     </div>
@@ -917,7 +913,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                     onScroll={handleScroll}
                     className={cn(
                         "w-full custom-scrollbar transition-all duration-500",
-                        isChatMode ? "flex-1 overflow-y-auto px-4 pt-16 sm:pt-24 pb-[35vh] sm:pb-[30vh] relative z-1" : "h-0 overflow-hidden"
+                        isChatMode ? "flex-1 overflow-y-auto px-4 pt-20 sm:pt-24 pb-[38vh] sm:pb-[30vh] relative z-1" : "h-0 overflow-hidden"
                     )}
                 >
                     <div className="max-w-5xl mx-auto flex flex-col gap-10">
