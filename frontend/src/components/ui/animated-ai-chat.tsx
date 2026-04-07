@@ -705,8 +705,8 @@ export function AnimatedAIChat() {
                         </button>
                     </div>
 
-                    {/* Highly Precise Center: Branding Logo */}
-                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+                    {/* Highly Precise Center: Branding Logo - Hidden on mobile to avoid overlap */}
+                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none hidden md:block">
                         <motion.div 
                             initial={{ opacity: 0, y: -10 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -715,7 +715,7 @@ export function AnimatedAIChat() {
                         >
                             <div className="relative px-4 py-1.5 rounded-2xl pointer-events-auto cursor-pointer">
                                 <span className={cn(
-                                    "relative z-10 text-2xl sm:text-3xl font-playfair font-bold tracking-tighter transition-all duration-500",
+                                    "relative z-10 text-3xl font-playfair font-bold tracking-tighter transition-all duration-500",
                                     isHeaderScrolled ? "scale-90 opacity-90" : "scale-100 opacity-100"
                                 )}>
                                     Laven<span className="text-violet-400">.</span>
@@ -742,17 +742,18 @@ export function AnimatedAIChat() {
                             </motion.button>
                         )}
                         
-                        {/* Persistent Account Section */}
-                        <div className="flex items-center gap-3 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl backdrop-blur-md pointer-events-auto shadow-lg">
-                            <div className="flex flex-col items-end pr-3 border-r border-white/10">
+                        {/* Persistent Account Section - Collaborative View on Mobile */}
+                        <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 px-2 sm:px-3 py-1.5 rounded-xl backdrop-blur-md pointer-events-auto shadow-lg">
+                            <div className="hidden sm:flex flex-col items-end pr-3 border-r border-white/10">
                                 <span className="text-[9px] text-white/40 uppercase tracking-widest font-bold">Account</span>
                                 <span className="text-xs font-medium text-white/80">{userEmail || 'User'}</span>
                             </div>
                             <button 
                                 onClick={handleSignOut}
-                                className="p-2 rounded-lg hover:bg-red-500/20 transition-all duration-300 text-white/40 hover:text-red-400 group focus:outline-none"
+                                className="p-2 rounded-lg hover:bg-red-500/20 transition-all duration-300 text-white/40 hover:text-red-400 group focus:outline-none flex items-center gap-2"
                                 title="Sign Out"
                             >
+                                <span className="text-[10px] sm:hidden font-bold uppercase tracking-widest opacity-60">Exit</span>
                                 <LogOut className="w-4 h-4 group-hover:scale-110 transition-transform" />
                             </button>
                         </div>
