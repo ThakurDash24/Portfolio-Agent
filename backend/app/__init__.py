@@ -137,21 +137,32 @@ class BasicAgent:
         # Add history
         history = self.get_historical_messages()
         for m in history:
-            # Handle potential LangChain message objects in history (from restore logic)
             if isinstance(m, dict):
-                msgs.append(m)
+                m_to_add = m.copy()
+                # 1. Ensure content is a string if it's None (Groq requirement)
+                if m_to_add.get("content") is None:
+                    m_to_add["content"] = ""
+                
+                # 2. 🔹 GROQ COMPATIBILITY: If current turn is text-only, flatten historical lists
+                # This prevents index errors/validation errors when mixing vision and non-vision turns
+                if not images and isinstance(m_to_add.get("content"), list):
+                    text_parts = [p.get("text", "") for p in m_to_add["content"] if isinstance(p, dict) and p.get("type") == "text"]
+                    m_to_add["content"] = " ".join(text_parts).strip()
+                
+                msgs.append(m_to_add)
             else:
-                # Basic string conversion for safety
                 msgs.append({"role": "assistant", "content": str(m)})
         
         # Add current user message
-        content = [{"type": "text", "text": text}]
-        if images:
+        if images and len(images) > 0:
+            content = [{"type": "text", "text": text}]
             for img in images:
                 content.append({
                     "type": "image_url",
                     "image_url": {"url": img}
                 })
+        else:
+            content = text
         msgs.append({"role": "user", "content": content})
         
         return msgs
@@ -355,6 +366,13 @@ class BasicAgent:
                     # Remove the JSON part but keep the lead-in text
                     msg.content = re.sub(r'\{.*\}', '', msg.content, flags=re.DOTALL).strip()
 
+                # 🔹 GROQ COMPATIBILITY: Content must be a string even for tool calls
+                if msg.get("content") is None:
+                    msg["content"] = ""
+                
+                # Append assistant message ONLY ONCE before tool responses
+                messages.append(msg)
+
                 for tc in tool_calls_data:
                     func_name = tc["name"]
                     args = tc["args"]
@@ -363,7 +381,6 @@ class BasicAgent:
                     reasoning_trace.append(f"Agent Action: Using {func_name}")
                     
                     # Execute tool
-                    # Execute tool using .invoke() or direct call if it's the function
                     if func_name == "websearch":
                         res = search_tool.invoke(args)
                     elif func_name == "browsersearch":
@@ -384,8 +401,6 @@ class BasicAgent:
                     
                     reasoning_trace.append(f"Observation: {func_name} returned data.")
                     
-                    # Add tool result to messages
-                    messages.append(msg)
                     # Support LiteLLM format expectations
                     messages.append({
                         "role": "tool",
@@ -414,19 +429,20 @@ class BasicAgent:
             exchange = []
             
             # 1. User message (with images if any)
-            user_msg = {"role": "user", "content": [{"type": "text", "text": text}]}
-            if images:
+            if images and len(images) > 0:
+                user_msg = {"role": "user", "content": [{"type": "text", "text": text}]}
                 for img in images:
                     user_msg["content"].append({"type": "image_url", "image_url": {"url": img}})
+            else:
+                user_msg = {"role": "user", "content": text}
             exchange.append(user_msg)
 
             # 2. Add intermediate tool calls/responses from this turn
-            # We already have them in the 'messages' list which was modified in the tool block
-            # We skip the system prompt at [0] and the history we previously added.
-            # History ended at len(self.get_historical_messages()) + 1 (for system prompt)
-            # Actually, simply taking the messages added *after* our initial user message is safer.
-            start_idx = len(self.get_historical_messages()) + 2 # skip system and initial user
+            # Ensure content consistency for assistant messages in history
+            start_idx = len(self.get_historical_messages()) + 2 
             for m in messages[start_idx:]:
+                if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content") is None:
+                    m["content"] = ""
                 exchange.append(m)
 
             # 3. Final Assistant Answer
