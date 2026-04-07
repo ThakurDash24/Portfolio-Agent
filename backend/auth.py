@@ -44,3 +44,17 @@ def get_current_user(authorization: str = Header(...)) -> str:
         print(f"Token received was: {token[:20]}...")
         print(f"Secret used was: {secret[:5]}...")
         raise HTTPException(status_code=401, detail=f"Invalid or expired token: {exc}") from exc
+
+
+def get_optional_user(authorization: str = Header(None)) -> str:
+    """
+    Dependency: Returns the user_id (sub) on success, 
+    otherwise returns "guest" (no 401 raised).
+    """
+    if not authorization:
+        return "guest"
+    try:
+        return get_current_user(authorization)
+    except Exception:
+        # Fallback to guest for any auth failure in optional mode
+        return "guest"

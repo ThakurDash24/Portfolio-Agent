@@ -143,7 +143,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 )
 Textarea.displayName = "Textarea"
 
-export function AnimatedAIChat() {
+export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
     const apiBaseUrl = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
     const [messages, setMessages] = useState<Message[]>([]);
     const [value, setValue] = useState("");
@@ -157,6 +157,7 @@ export function AnimatedAIChat() {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const pdfInputRef = useRef<HTMLInputElement>(null);
     const commandPaletteRef = useRef<HTMLDivElement>(null);
+    const sidebarRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const { adjustHeight } = useAutoResizeTextarea({ minHeight: 60, maxHeight: 200 });
     const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
@@ -167,6 +168,11 @@ export function AnimatedAIChat() {
 
     // 🔐 Auth guard: redirect to login if no active Supabase session
     useEffect(() => {
+        if (guestMode) {
+            setUserEmail("Guest User");
+            return;
+        }
+        
         supabase.auth.getSession().then(({ data }: { data: { session: any } }) => {
             if (!data.session) {
                 navigate('/login', { replace: true });
@@ -174,10 +180,14 @@ export function AnimatedAIChat() {
                 setUserEmail(data.session.user?.email || null);
             }
         });
-    }, [navigate]);
+    }, [navigate, guestMode]);
 
     /** Returns headers with Bearer token for authenticated API calls. Throws if no session. */
     const authHeaders = async (): Promise<Record<string, string>> => {
+        if (guestMode) {
+            return { 'Content-Type': 'application/json' };
+        }
+        
         const token = await getAccessToken();
         if (!token) {
             navigate('/login', { replace: true });
@@ -290,6 +300,13 @@ export function AnimatedAIChat() {
                 !commandPaletteRef.current.contains(target) &&
                 !commandButton?.contains(target)) {
                 setShowCommandPalette(false);
+            }
+
+            const historyButton = document.querySelector('[data-history-button]');
+            if (sidebarRef.current && 
+                !sidebarRef.current.contains(target) && 
+                !historyButton?.contains(target)) {
+                setShowSidebar(false);
             }
         };
 
@@ -555,6 +572,7 @@ export function AnimatedAIChat() {
     const [editingTitle, setEditingTitle] = useState("");
 
     const fetchThreads = async () => {
+        if (guestMode) return;
         try {
             const token = await getAccessToken();
             if (!token) return; // Not logged in yet, skip silently
@@ -581,9 +599,11 @@ export function AnimatedAIChat() {
     };
 
     useEffect(() => {
-        fetchThreads();
+        if (!guestMode) {
+            fetchThreads();
+        }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [guestMode]);
 
     const handleNewChat = () => {
         setMessages([]);
@@ -597,7 +617,7 @@ export function AnimatedAIChat() {
     };
 
     const handleSaveSession = async () => {
-        if (!currentThreadId) return;
+        if (guestMode || !currentThreadId) return;
         try {
             const headers = await authHeaders();
             const response = await fetch(`${apiBaseUrl}/save_thread/${currentThreadId}`, {
@@ -615,6 +635,7 @@ export function AnimatedAIChat() {
     };
 
     const loadThread = async (id: string) => {
+        setShowSidebar(false);
         try {
             const headers = await authHeaders();
             const response = await fetch(`${apiBaseUrl}/thread/${id}`, { headers });
@@ -684,7 +705,9 @@ export function AnimatedAIChat() {
     };
 
     const handleSignOut = async () => {
-        await supabase.auth.signOut();
+        if (!guestMode) {
+            await supabase.auth.signOut();
+        }
         navigate('/login');
     };
 
@@ -702,20 +725,30 @@ export function AnimatedAIChat() {
                     
                     {/* Left: Navigation Controls */}
                     <div className="flex items-center gap-3 z-10">
-                        <button 
-                            onClick={() => setShowSidebar(!showSidebar)}
-                            className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all duration-300 text-white/50 hover:text-white group pointer-events-auto"
-                            title="History"
-                        >
-                            <Menu className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                        </button>
-                        <button 
-                            onClick={handleNewChat}
-                            className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all duration-300 text-white/50 hover:text-white group pointer-events-auto"
-                            title="New Chat"
-                        >
-                            <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                        </button>
+                        {!guestMode && (
+                            <>
+                                <button 
+                                    data-history-button
+                                    onClick={() => setShowSidebar(!showSidebar)}
+                                    className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all duration-300 text-white/50 hover:text-white group pointer-events-auto"
+                                    title="History"
+                                >
+                                    <Menu className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                                </button>
+                                <button 
+                                    onClick={handleNewChat}
+                                    className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all duration-300 text-white/50 hover:text-white group pointer-events-auto"
+                                    title="New Chat"
+                                >
+                                    <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                                </button>
+                            </>
+                        )}
+                        {guestMode && (
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200/80 text-[10px] uppercase font-bold tracking-widest animate-pulse">
+                                <Sparkles className="w-3 h-3" /> Guest Mode
+                            </div>
+                        )}
                     </div>
 
                     {/* Highly Precise Center: Branding Logo - Hidden on mobile to avoid overlap */}
@@ -739,7 +772,7 @@ export function AnimatedAIChat() {
 
                     {/* Right: Save Session Actions & Account */}
                     <div className="flex justify-end items-center gap-4 z-10">
-                        {currentThreadId && (
+                        {currentThreadId && !guestMode && (
                             <motion.button
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
@@ -764,9 +797,9 @@ export function AnimatedAIChat() {
                             <button 
                                 onClick={handleSignOut}
                                 className="p-2 rounded-lg hover:bg-red-500/20 transition-all duration-300 text-white/40 hover:text-red-400 group focus:outline-none flex items-center gap-2"
-                                title="Sign Out"
+                                title={guestMode ? "Login" : "Sign Out"}
                             >
-                                <span className="text-[10px] sm:hidden font-bold uppercase tracking-widest opacity-60">Exit</span>
+                                <span className="text-[10px] sm:hidden font-bold uppercase tracking-widest opacity-60">{guestMode ? "Login" : "Exit"}</span>
                                 <LogOut className="w-4 h-4 group-hover:scale-110 transition-transform" />
                             </button>
                         </div>
@@ -778,6 +811,7 @@ export function AnimatedAIChat() {
             <AnimatePresence>
                 {showSidebar && (
                     <motion.div
+                        ref={sidebarRef}
                         initial={{ opacity: 0, x: -50 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -50 }}

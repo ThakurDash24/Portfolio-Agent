@@ -15,6 +15,11 @@ function App() {
             <AnimatedAIChat />
           </BeamsBackground>
         } />
+        <Route path="/guest_chat" element={
+          <BeamsBackground>
+            <AnimatedAIChat guestMode={true} />
+          </BeamsBackground>
+        } />
         <Route path="/login" element={<LoginPage />} />
       </Routes>
     </Router>

@@ -12,7 +12,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile, Depends
-from auth import get_current_user
+from auth import get_current_user, get_optional_user
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
@@ -63,6 +63,10 @@ def save_sessions_to_db():
     import json as _json
 
     for tid, s in _sessions.items():
+        # 🚀 Guest Protection: Never save guest sessions to the database
+        if s.get("user_id") == "guest":
+            continue
+            
         if not (s.get("saved", False) or s["agent"].is_saved):
             continue
 
@@ -147,6 +151,7 @@ def restore_thread_into_memory(thread_id: str, user_id: Optional[str] = None):
             "agent": agent,
             "title": row.get("title", "Chat"),
             "saved": row.get("is_saved", False),
+            "user_id": user_id,
         }
         agent.current_thread_id = thread_id
         agent.is_saved = row.get("is_saved", False)
@@ -223,8 +228,8 @@ def get_session(thread_id: str, user_id: str):
         except Exception as e:
             print(f"Failed to initialize guest retriever: {e}")
 
-    # 🔐 Ownership check — thread must belong to this user in the DB
-    if _SUPABASE_ENABLED:
+    # 🔐 Ownership check — thread must belong to this user in the DB (skip for guests)
+    if _SUPABASE_ENABLED and user_id != "guest":
         try:
             res = _sb.table("chat_threads") \
                 .select("id") \
@@ -232,6 +237,7 @@ def get_session(thread_id: str, user_id: str):
                 .eq("user_id", user_id) \
                 .execute()
             if not res.data:
+                # If we have a user_id but thread isn't in DB, they might be trying to access someone else's thread
                 raise HTTPException(status_code=403, detail="Access denied")
         except HTTPException:
             raise
@@ -248,7 +254,8 @@ def get_session(thread_id: str, user_id: str):
         _sessions[thread_id] = {
             "agent": BasicAgent(),
             "title": "New Chat",
-            "saved": False
+            "saved": False,
+            "user_id": user_id
         }
         _sessions[thread_id]["agent"].create_thread(thread_id)
     return _sessions[thread_id]
@@ -308,7 +315,7 @@ def health():
 
 
 @app.post("/upload/image", response_model=ImageUploadResponse)
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(file: UploadFile = File(...), user_id: str = Depends(get_optional_user)):
     """Upload image to Supabase Storage and return public URL."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename")
@@ -344,7 +351,7 @@ async def upload_image(file: UploadFile = File(...)):
 
 
 @app.post("/upload/pdf", response_model=PdfUploadResponse)
-async def upload_pdf(thread_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user)):
+async def upload_pdf(thread_id: str, file: UploadFile = File(...), user_id: str = Depends(get_optional_user)):
     """Upload PDF to Supabase Storage and index it for the specific session's agent."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename")
@@ -366,8 +373,8 @@ async def upload_pdf(thread_id: str, file: UploadFile = File(...), user_id: str 
                 has_pdf=True
             )
 
-        # Step 4.3 — Hard DB duplicate check before proceeding
-        if _SUPABASE_ENABLED:
+        # Step 4.3 — Hard DB duplicate check before proceeding (skip for guests)
+        if _SUPABASE_ENABLED and user_id != "guest":
             try:
                 existing = _sb.table("documents").select("id").eq("thread_id", thread_id).execute()
                 if existing.data:
@@ -392,8 +399,8 @@ async def upload_pdf(thread_id: str, file: UploadFile = File(...), user_id: str 
         print(f"RESETTING PDF MEMORY for thread: {thread_id}")
         session["agent"].vector_db = None
 
-        # Step 4.1 — Insert document metadata into documents table
-        if _SUPABASE_ENABLED:
+        # Step 4.1 — Insert document metadata into documents table (skip for guests)
+        if _SUPABASE_ENABLED and user_id != "guest":
             try:
                 _sb.table("documents").insert({
                     "thread_id": thread_id,
@@ -450,9 +457,9 @@ def web_search(req: WebSearchRequest):
 
 
 @app.get("/threads", response_model=List[ThreadItem])
-def list_threads(user_id: str = Depends(get_current_user)):
+def list_threads(user_id: str = Depends(get_optional_user)):
     """Return only threads owned by the authenticated user."""
-    if _SUPABASE_ENABLED:
+    if _SUPABASE_ENABLED and user_id != "guest":
         try:
             res = _sb.table("chat_threads") \
                 .select("id, title") \
@@ -461,6 +468,10 @@ def list_threads(user_id: str = Depends(get_current_user)):
             return [ThreadItem(id=row["id"], title=row["title"]) for row in (res.data or [])]
         except Exception as e:
             print(f"[Supabase] list_threads failed: {e}")
+    
+    if user_id == "guest":
+        return [] # Guests don't have persistent history
+        
     # Fallback: in-memory (no user isolation guarantee)
     return [
         ThreadItem(id=tid, title=s["title"])
@@ -469,7 +480,7 @@ def list_threads(user_id: str = Depends(get_current_user)):
     ]
 
 @app.post("/threads/new")
-def new_thread(user_id: str = Depends(get_current_user)):
+def new_thread(user_id: str = Depends(get_optional_user)):
     from datetime import datetime, timezone
     tid = uuid.uuid4().hex
     _sessions[tid] = {
@@ -479,8 +490,8 @@ def new_thread(user_id: str = Depends(get_current_user)):
     }
     _sessions[tid]["agent"].create_thread(tid)
 
-    # ✅ Insert thread row with user_id binding
-    if _SUPABASE_ENABLED:
+    # ✅ Insert thread row with user_id binding (skip for guests)
+    if _SUPABASE_ENABLED and user_id != "guest":
         try:
             _sb.table("chat_threads").insert({
                 "id": tid,
@@ -496,7 +507,7 @@ def new_thread(user_id: str = Depends(get_current_user)):
 
 
 @app.get("/thread/{thread_id}")
-def get_thread(thread_id: str, user_id: str = Depends(get_current_user)):
+def get_thread(thread_id: str, user_id: str = Depends(get_optional_user)):
     # Verify ownership before returning
     if _SUPABASE_ENABLED:
         try:
@@ -601,7 +612,7 @@ def update_thread_title(thread_id: str, payload: ThreadTitleUpdate, user_id: str
     return {"message": "Title updated"}
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, user_id: str = Depends(get_current_user)):
+async def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
     text = req.message.strip()
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
