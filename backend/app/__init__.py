@@ -109,6 +109,12 @@ class BasicAgent:
             - You do NOT know the user's name. If they ask 'who am I?', inform them they are an anonymous guest/explorer.
             - If user says 'bye' or similar, just wish them well and end the conversation politely. DO NOT trigger or suggest saving.
 
+            CRITICAL BROWSER PROTOCOL:
+            - When the user asks for a search, you can use 'websearch' for quick answers.
+            - When the user asks for 'deep search', 'real browsing', or uses '/browser', you MUST use 'browsersearch'.
+            - The browser is a HEADLESS instance of Chrome running on the server. It is NOT the user's local browser window.
+            - You can click buttons, scroll, and go back once the browser is open.
+            
             CRITICAL ANTI-HALLUCINATION PROTOCOL:
             When you need to invoke a tool, you MUST use the native JSON Schema Function Calling API. 
             NEVER under any circumstances output raw XML strings like `<function=...></function>`. 
@@ -181,29 +187,9 @@ class BasicAgent:
         if not self.current_thread_id:
             raise ValueError("No thread selected. Call switch_thread first.")
 
-        # Direct command handling moved to standard loop for better autonomy
-        if text.lower().startswith("/browser "):
-            # Let it flow to the tool call loop for smarter decision making
-            pass 
-            
-        if text.lower().startswith("/pdf"):
-            if not self.vector_db:
-                answer = "I am a under testing small agent, can't handle much .. (No PDF uploaded yet)"
-                self.threads[self.current_thread_id]["messages"].append({"role": "user", "content": text})
-                self.threads[self.current_thread_id]["messages"].append({"role": "assistant", "content": answer})
-                return answer, "› Prompted for a PDF"
-
-        if text.lower().startswith("/photo"):
-            if not images and not self.has_image:
-                answer = "I am a under testing small agent, I can't handle more pictures in a single thread , Feel free to ask about the photo you uploaded."
-                self.threads[self.current_thread_id]["messages"].append({"role": "user", "content": text})
-                self.threads[self.current_thread_id]["messages"].append({"role": "assistant", "content": answer})
-                return answer, "› Prompted for a Photo"
-        # -------------------------------
-
         reasoning_trace = []
         
-        # 🔹 ENFORCE BROWSER LOGIC: If user uses /browser, we MUST use browsersearch
+        # 🔹 ENFORCE BROWSER LOGIC: If user uses /browser, we MUST start with browsersearch
         is_direct_browser = text.lower().startswith("/browser ")
         if is_direct_browser:
             text = text[9:].strip()
@@ -221,7 +207,7 @@ class BasicAgent:
             messages.append({"role": "system", "content": f"Context from PDF: {search_context}"})
             reasoning_trace.append(f"Retrieved relevant chunks from the uploaded PDF.")
 
-        # 2. Define tools for LiteLLM - Using extremely simple names and descriptions for Better Groq compatibility
+        # 2. Define tools
         available_tools = [
             {
                 "type": "function",
@@ -241,7 +227,7 @@ class BasicAgent:
                 "type": "function",
                 "function": {
                     "name": "browsersearch",
-                    "description": "Opens a Chrome window via Helium. Returns search fragments AND clickable links. If fragments are insufficient, you MUST use browserclick on the best Link to perform deep research into the target site.",
+                    "description": "Opens Chrome via Helium. Returns search fragments AND clickable links. If fragments are insufficient, you MUST use browserclick on the best Link to perform deep research.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -284,10 +270,7 @@ class BasicAgent:
                 "function": {
                     "name": "browserback",
                     "description": "Go back in browser history.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
+                    "parameters": {"type": "object", "properties": {}}
                 }
             },
             {
@@ -308,232 +291,178 @@ class BasicAgent:
                 "type": "function",
                 "function": {
                     "name": "savesession",
-                    "description": "Marks the current chat session to be saved locally. Run this when the user asks you to save the session.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
+                    "description": "Marks the current chat session to be saved.",
+                    "parameters": {"type": "object", "properties": {}, "required": []}
                 }
             }
         ]
 
-        try:
-            from litellm import completion
-            if images:
-                model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
-            else:
-                model = "groq/llama-3.3-70b-versatile"
+        from litellm import completion
+        import json
+        import re
 
-            reasoning_trace.append(f"Asking {model} for response strategy...")
-            
-            response = completion(
-                model=model,
-                messages=messages,
-                tools=available_tools,
-                tool_choice="auto",
-                temperature=0.7,
-                api_key=os.getenv("GROQ_API_KEY")
-            )
-            
-            msg = response.choices[0].message
-            
-            # Check for tool calls and handle them
-            tool_calls_data = []
-            
-            if msg.get("tool_calls"):
-                for tc in msg.get("tool_calls"):
-                    import json
-                    tool_calls_data.append({
-                        "id": tc.id,
-                        "name": tc.function.name,
-                        "args": json.loads(tc.function.arguments)
-                    })
-            elif msg.content and ('"name":' in msg.content or "'name':" in msg.content):
-                # Fallback: Model answered with raw json text instead of native tool call
-                import json
-                import re
-                try:
-                    match = re.search(r'\{.*\}', msg.content, re.DOTALL)
-                    if match:
-                        parsed = json.loads(match.group(0))
-                        if "name" in parsed:
-                            args = parsed.get("parameters", parsed.get("arguments", {}))
-                            if isinstance(args, str):
-                                args = json.loads(args)
-                            tool_calls_data.append({
-                                "id": "call_fallback",
-                                "name": parsed["name"],
-                                "args": args
-                            })
-                            reasoning_trace.append("Fallback: Intercepted raw JSON text as a tool call.")
-                except Exception as e:
-                    print(f"Fallback parse failed: {e}")
+        if images:
+            model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
+        else:
+            model = "groq/llama-3.3-70b-versatile"
 
-            if tool_calls_data:
-                # 🔹 CLEANUP HALLUCINATED JSON FROM FINAL ANSWER
-                if msg.content and ('"name":' in msg.content or "'name':" in msg.content):
-                    import re
-                    # Remove the JSON part but keep the lead-in text
-                    msg.content = re.sub(r'\{.*\}', '', msg.content, flags=re.DOTALL).strip()
+        # 🔹 AGENTIC LOOP (Up to 5 turns)
+        max_turns = 5
+        turn = 0
+        final_answer = ""
 
-                # 🔹 GROQ COMPATIBILITY: Content must be a string even for tool calls
-                if msg.get("content") is None:
-                    msg["content"] = ""
+        while turn < max_turns:
+            turn += 1
+            reasoning_trace.append(f"Turn {turn}: Asking {model} for action...")
+            
+            try:
+                # 🔹 HARDENED TOOL ENFORCEMENT: If /browser was used, FORCE 'browsersearch' tool
+                current_tool_choice = "auto"
+                if is_direct_browser and turn == 1:
+                    current_tool_choice = {"type": "function", "function": {"name": "browsersearch"}}
+                    reasoning_trace.append("Forcing Tool Choice: browsersearch")
+
+                response = completion(
+                    model=model,
+                    messages=messages,
+                    tools=available_tools if turn < max_turns else None, # Stop offering tools at last turn
+                    tool_choice=current_tool_choice if turn < max_turns else "none",
+                    temperature=0.7,
+                    api_key=os.getenv("GROQ_API_KEY")
+                )
                 
-                # Append assistant message ONLY ONCE before tool responses
-                messages.append(msg)
+                msg = response.choices[0].message
+                
+                # Check for tool calls
+                tool_calls = msg.get("tool_calls")
+                
+                # --- GROQ FALLBACK: Check for JSON in content ---
+                if not tool_calls and msg.content and ('"name":' in msg.content or "'name':" in msg.content):
+                    try:
+                        match = re.search(r'\{.*\}', msg.content, re.DOTALL)
+                        if match:
+                            parsed = json.loads(match.group(0))
+                            if "name" in parsed:
+                                args = parsed.get("parameters", parsed.get("arguments", {}))
+                                if isinstance(args, str): args = json.loads(args)
+                                # Convert to tool_call format
+                                tc_id = f"call_{uuid.uuid4().hex[:8]}"
+                                tool_calls = [{"id": tc_id, "function": {"name": parsed["name"], "arguments": json.dumps(args)}}]
+                                reasoning_trace.append("Intercepted raw JSON text as a tool call.")
+                    except: pass
 
-                for tc in tool_calls_data:
-                    func_name = tc["name"]
-                    args = tc["args"]
-                    tool_call_id = tc["id"]
+                if not tool_calls:
+                    # No more tools, this is the final answer
+                    final_answer = msg.content or ""
+                    break
+
+                # 🚀 Process multiple tool calls in parallel if model emitted them
+                # (Llama-3-70b often does this for searches)
+                messages.append(msg)
+                
+                for tc in tool_calls:
+                    if isinstance(tc, dict):
+                        func_name = tc["function"]["name"]
+                        args_str = tc["function"]["arguments"]
+                        tc_id = tc["id"]
+                    else: # LiteLLM object
+                        func_name = tc.function.name
+                        args_str = tc.function.arguments
+                        tc_id = tc.id
+                    
+                    try:
+                        args = json.loads(args_str)
+                    except:
+                        args = {"query": args_str} # Fallback for malformed args
                     
                     reasoning_trace.append(f"Agent Action: Using {func_name}")
                     
                     # Execute tool
-                    if func_name == "websearch":
-                        res = search_tool.invoke(args)
-                    elif func_name == "browsersearch":
-                        res = browser_tool.invoke(args)
-                    elif func_name == "browserclick":
-                        res = click_tool.invoke(args)
-                    elif func_name == "browserback":
-                        res = back_tool.invoke({})
-                    elif func_name == "guestinfo":
-                        res = guest_info_tool.invoke(args)
-                    elif func_name == "hubstats":
-                        res = hub_stats_tool.invoke(args)
-                    elif func_name == "savesession":
-                        if self.user_id == "guest":
-                            res = "Saving is not available in guest mode. Please log in to save sessions."
+                    res = ""
+                    try:
+                        if func_name == "websearch": res = search_tool.invoke(args)
+                        elif func_name == "browsersearch": res = browser_tool.invoke(args)
+                        elif func_name == "browserclick": res = click_tool.invoke(args)
+                        elif func_name == "browserback": res = back_tool.invoke({})
+                        elif func_name == "guestinfo": res = guest_info_tool.invoke(args)
+                        elif func_name == "hubstats": res = hub_stats_tool.invoke(args)
+                        elif func_name == "savesession":
+                            if self.user_id == "guest":
+                                res = "Saving is not available in guest mode."
+                            else:
+                                self.is_saved = True
+                                res = "Session marked as saved."
                         else:
-                            self.is_saved = True
-                            res = "Session successfully marked as saved."
-                    else:
-                        res = f"Tool '{func_name}' not found."
+                            res = f"Tool '{func_name}' not found."
+                    except Exception as tool_e:
+                        res = f"Tool Execution Error: {str(tool_e)}"
                     
                     reasoning_trace.append(f"Observation: {func_name} returned data.")
                     
-                    # Support LiteLLM format expectations
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": tool_call_id,
+                        "tool_call_id": tc_id,
                         "name": func_name,
                         "content": str(res)
                     })
+
+            except Exception as e:
+                err_str = str(e)
+                # 🔹 XML RECOVERY (For Groq <function=...> hallucination)
+                if '<function=' in err_str.replace('\\u003c', '<'):
+                    clean_err = err_str.replace('\\u003c', '<').replace('\\u003e', '>')
+                    match = re.search(r'<function=([a-zA-Z0-9_]+)\s*(\{.*?\})\s*>?', clean_err, re.DOTALL)
+                    if match:
+                        func_name = match.group(1)
+                        try:
+                            args = json.loads(match.group(2).rstrip('>'))
+                            reasoning_trace.append(f"Recovered XML tool: {func_name}")
+                            # Execute and append to messages
+                            res = ""
+                            if func_name == "browsersearch": res = browser_tool.invoke(args)
+                            elif func_name == "browserclick": res = click_tool.invoke(args)
+                            # (Add other tools as needed, but browser is priority for user)
+                            
+                            # Add fake assistant message + tool response to messages to "fix" the chain
+                            messages.append({"role": "assistant", "content": f"I will now use {func_name}.", "tool_calls": [{"id": "xml_fix", "type": "function", "function": {"name": func_name, "arguments": json.dumps(args)}}]})
+                            messages.append({"role": "tool", "tool_call_id": "xml_fix", "name": func_name, "content": str(res)})
+                            continue # Loop back to let model process result
+                        except: pass
                 
-                reasoning_trace.append("Generating final answer with tool data...")
-                response = completion(
-                    model=model, 
-                    messages=messages,
-                    api_key=os.getenv("GROQ_API_KEY")
-                )
-                answer = response.choices[0].message.content
-            else:
-                reasoning_trace.append("Model answered directly without tools.")
-                answer = msg.content or ""
+                reasoning_trace.append(f"ERROR in loop: {str(e)}")
+                final_answer = f"I encountered an error during research: {str(e)}"
+                break
 
-            # Check for save signal
-            if "marked as saved" in answer.lower() or "session saved" in answer.lower():
-                self.is_saved = True
-                reasoning_trace.append("Session save triggered by model response.")
+        # Check for save signal in final answer
+        if "marked as saved" in final_answer.lower() or "session saved" in final_answer.lower():
+            self.is_saved = True
 
-            # Save to history - Full exchange for continuity
-            exchange = []
-            
-            # 1. User message (with images if any)
-            if images and len(images) > 0:
-                user_msg = {"role": "user", "content": [{"type": "text", "text": text}]}
-                for img in images:
-                    user_msg["content"].append({"type": "image_url", "image_url": {"url": img}})
-            else:
-                user_msg = {"role": "user", "content": text}
-            exchange.append(user_msg)
-
-            # 2. Add intermediate tool calls/responses from this turn
-            # Ensure content consistency for assistant messages in history
-            start_idx = len(self.get_historical_messages()) + 2 
-            for m in messages[start_idx:]:
-                if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content") is None:
-                    m["content"] = ""
+        # Update History
+        exchange = []
+        if images and len(images) > 0:
+            user_msg = {"role": "user", "content": [{"type": "text", "text": text}]}
+            for img in images: user_msg["content"].append({"type": "image_url", "image_url": {"url": img}})
+        else:
+            user_msg = {"role": "user", "content": text}
+        exchange.append(user_msg)
+        
+        # Add all intermediate turns to history
+        start_idx = len(self.get_historical_messages()) + 1 # +1 for system message
+        for m in messages[start_idx:]:
+            # Clean up litellm objects for history storage
+            if hasattr(m, "get"):
                 exchange.append(m)
+            else:
+                # Handle LiteLLM message objects
+                m_dict = {"role": m.role, "content": m.content or ""}
+                if hasattr(m, "tool_calls") and m.tool_calls:
+                    m_dict["tool_calls"] = m.tool_calls
+                exchange.append(m_dict)
 
-            # 3. Final Assistant Answer
-            exchange.append({"role": "assistant", "content": answer})
-            
-            self.threads[self.current_thread_id]["messages"].extend(exchange)
-            
-            formatted_reasoning = "\n".join([f"› {s}" for s in reasoning_trace])
-            return answer, formatted_reasoning
-            
-        except Exception as e:
-            err_str = str(e)
-            
-            # --- GROQ XML HALLUCINATION RECOVERY TRAP ---
-            if 'failed_generation' in err_str:
-                import re, json
-                
-                # Litellm / Groq sometimes escapes XML brackets in the error payload
-                clean_err = err_str.replace('\\u003c', '<').replace('\\u003e', '>')
-                
-                if '<function=' in clean_err:
-                    try:
-                        # Groq format: <function=toolname{"key":"val"}></function>
-                        # The > of the opening tag is part of the args string - strip it
-                        clean_str = clean_err.replace('\\"', '"')
-                        match = re.search(r'<function=([a-zA-Z0-9_]+)\s*(\{.*?\})\s*>?', clean_str, re.DOTALL)
-                        if match:
-                            func_name = match.group(1)
-                            raw_args = match.group(2).rstrip('>')  # safety strip in case > slips in
-                            args = json.loads(raw_args)
-                            
-                            reasoning_trace.append(f"Intercepted Groq tool failure. Recovering tool call for: {func_name} ...")
-                            
-                            # Execute the targeted tool
-                            res = "Tool not found"
-                            if func_name == "websearch":
-                                res = search_tool.invoke(args)
-                            elif func_name == "browsersearch":
-                                res = browser_tool.invoke(args)
-                            elif func_name == "browserclick":
-                                res = click_tool.invoke(args)
-                            elif func_name == "browserback":
-                                res = back_tool.invoke({})
-                            elif func_name == "guestinfo":
-                                res = guest_info_tool.invoke(args)
-                            elif func_name == "hubstats":
-                                res = hub_stats_tool.invoke(args)
-                            elif func_name == "savesession":
-                                self.is_saved = True
-                                res = "Session successfully marked as saved."
-                            
-                            # Feed the result back into LiteLLM
-                            messages.append({"role": "assistant", "content": f"I will now execute the {func_name} tool."})
-                            messages.append({"role": "tool", "tool_call_id": "fallback_id", "name": func_name, "content": str(res)})
-                            
-                            reasoning_trace.append(f"Successfully executed {func_name}. Generating final answer...")
-                            
-                            response = completion(
-                                model=model, 
-                                messages=messages,
-                                api_key=os.getenv("GROQ_API_KEY")
-                            )
-                            answer = response.choices[0].message.content
-                            
-                            formatted_reasoning = "\n".join([f"› {s}" for s in reasoning_trace])
-                            return answer, formatted_reasoning
-                        else:
-                            raise ValueError(f"Could not parse XML tool trap: {clean_str}")
-                        
-                    except Exception as inner_e:
-                        print(f"Failed to recover XML tool: {inner_e}")
-            # -----------------------------------------------
-
-            err_msg = f"Error in BasicAgent.__call__: {e}"
-            print(err_msg)
-            return f"I encountered an error: {str(e)}", f"› ERROR: {str(e)}"
-
+        self.threads[self.current_thread_id]["messages"].extend(exchange)
+        formatted_reasoning = "\n".join([f"› {s}" for s in reasoning_trace])
+        
+        return final_answer, formatted_reasoning
 
 # Export for from app import BasicAgent
 __all__ = ["BasicAgent"]

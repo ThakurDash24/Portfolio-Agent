@@ -197,17 +197,23 @@ def browser_search_tool(query: str) -> str:
     from selenium.webdriver.common.by import By
     try:
         options = Options()
-        # Avoid common issues with automated browsers
-        options.add_argument("--disable-blink-features=AutomationControlled")
         
         # 🚀 Production Support: Headless mode for cloud environments like Render
-        if os.getenv("RENDER") or os.getenv("HEADLESS"):
-            print("Production environment detected. Enabling headless browser mode...")
-            options.add_argument("--headless")
+        if os.getenv("RENDER") or os.getenv("HEADLESS") or os.getenv("PORT"):
+            print("Production environment (Render) detected. Enabling hardened headless browser mode...")
+            
+            # Aggressive anti-bot/stealth measures for production
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+            options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+            options.add_argument("--disable-infobars")
+            options.add_argument("--window-size=1920,1080")
+            options.add_argument("--headless=new")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--disable-gpu")
-            # Set a common user agent to avoid being blocked in headless mode
+        else:
             options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
         # Ensure query is encoded properly
@@ -215,7 +221,14 @@ def browser_search_tool(query: str) -> str:
         search_url = f"https://www.google.com/search?q={encoded_query}"
         
         print(f"Opening browser for query: {query}")
-        helium.start_chrome(search_url, options=options)
+        try:
+            helium.start_chrome(search_url, options=options)
+        except Exception as startup_err:
+            # 🚨 CRITICAL: If start_chrome fails, provide actionable feedback
+            err_msg = str(startup_err)
+            if "executable" in err_msg.lower():
+                return f"Browser Error: Chrome not found in production environment (Render). Ensure the 'render-buildpack-chrome-headless' is added. Details: {err_msg}"
+            return f"Browser Startup Failed: {err_msg}"
         
         # Check for CAPTCHA (/sorry)
         current_url = helium.get_driver().current_url
@@ -223,9 +236,14 @@ def browser_search_tool(query: str) -> str:
             print("Google CAPTCHA detected (/sorry). Switching to DuckDuckGo immediately...")
             helium.go_to(f"https://duckduckgo.com/?q={encoded_query}")
             # wait a bit for DDG to load
-            for _ in range(5):
+            time.sleep(2) 
+            for _ in range(10):
                 if "duckduckgo" in helium.get_driver().current_url.lower():
-                    break
+                    # Wait for results to actually render
+                    try:
+                        driver.find_element(By.ID, 'links')
+                        break
+                    except: pass
                 time.sleep(0.5)
         
         # Check for initial content before scrolling to save time
