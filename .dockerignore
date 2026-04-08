@@ -1,0 +1,24 @@
+# Local development files
+.git
+.gitignore
+README.md
+Dockerfile
+.env
+backend/.env
+frontend/.env
+*.md
+
+# Python
+**/__pycache__
+**/*.pyc
+backend/venv
+backend/sessions.json
+
+# Frontend
+frontend/node_modules
+frontend/build
+frontend/package-lock.json
+
+# System
+.DS_Store
+Thumbs.db
