@@ -260,7 +260,7 @@ class BasicAgent:
         if images:
             model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
         else:
-            model = "groq/gpt-oss-120b"
+            model = "groq/llama-3.3-70b-versatile"
 
         # 🔹 AGENTIC LOOP (Up to 5 turns)
         max_turns = 5
