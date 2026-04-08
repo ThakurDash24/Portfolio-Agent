@@ -185,7 +185,7 @@ guest_info_tool = guest_info_retriever
 def search_the_web(query: str) -> str:
     """Use this for real-time info, unknown facts, or anything not in memory."""
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=5))
 

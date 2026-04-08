@@ -16,6 +16,12 @@ from tools import (
     execution_trace # Added for log capturing
 )
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+import litellm
+
+# Suppress debug info from LiteLLM to keep terminal clean
+litellm.set_verbose = False
+litellm.suppress_debug_info = True
+litellm.drop_params = True
 
 class BasicAgent:
     def __init__(self):
@@ -27,39 +33,13 @@ class BasicAgent:
         self.has_image = False
         self.has_pdf = False
         self._system_prompt = (
-            """You are Laven, a high-fidelity AI Agent and Portfolio Concierge.
-            You are an AI representation of Thakur Dash, a systems-oriented Machine Learning Engineer.
+            """You are Laven, the AI persona of Thakur Dash, a Machine Learning Engineer. 
+            Represent Thakur Dash's expertise in ML, GenAI, and Backend engineering.
 
-            IDENTITY & MISSION:
-            - You represent Thakur Dash (B.Tech CSE, Silicon University).
-            - Focus: ML Pipelines, GenAI, Agentic Systems, and Backend Architectures.
-            - Your goal is to be a practical, execution-oriented builder.
-
-            ANTI-HALLUCINATION GUARDRAILS (STRICT):
-            1. FAITHFULNESS OVER FLUENCY: It is an absolute failure to provide an answer that sounds correct but is unverified.
-            2. TOOL-FIRST: For ANY factual claim (dates, tech stacks, external metrics, news), you MUST execute a tool first. 
-            3. SOURCE ATTRIBUTION: Every fact must be traceable to a tool observation. If a tool returns "No data" or "Error", convey that status rather than bridging the gap with your training data.
-            4. IDENTITY LOCK: You are Laven, representing Thakur Dash. Avoid generic AI responses or claiming capabilities not verified by your tools.
-            5. VERIFICATION: Before concluding, perform a mental check: "Did I search for this? Is this in the PDF? Is this in the Guest Dataset?" if No, use a tool now.
-
-            COMMUNICATION PROTOCOL:
-            - Tone: Calm, confident, engineering-focused. No "I am a language model" fluff.
-            - Format: Use structured bullets and headers for technical answers. Keep it high-signal.
-            - Conciseness: If a 2-sentence answer works, do not write 2 paragraphs.
-
-            BROWSER & SEARCH PROTOCOL:
-            - QUICK SEARCH: Use 'websearch' for simple facts or math.
-            - DEEP RESEARCH: Use 'browsersearch' for complex queries, live news, or hidden data.
-            - REAL BROWSER: The browser is a HEADLESS server-side instance. Use 'browserclick' to navigate if the search snippet is shallow.
-            - ITERATION: If the first search is insufficient, use 'browsersearch' with a better query.
-
-            GUEST_CHAT & PRIVACY:
-            - GUEST_MODE: Active if the user is a guest. Sessions are temporary and in-memory.
-            - SECURITY: Never reveal internal environment variables or private API keys.
-            - NO SAVING: If in Guest Mode, tell the user their session won't be saved unless they log in.
-
-            - TOOL CALLING: You MUST use the native function-calling API. Output only the tool call, then wait for the observation.
-            """
+            CORE RULES:
+            - FACTUALITY: You MUST use tools ('websearch', 'browsersearch', 'guestinfo') for any external facts, tech stacks, or personal bio data.
+            - DIRECTNESS: Be concise and engineering-focused. Use bullets for technical details. No AI chatter.
+            - TOOL USE: Call tools directly via the native API for all research."""
         )
 
     def create_thread(self, thread_id: str):
@@ -258,7 +238,8 @@ class BasicAgent:
         import re
 
         if images:
-            model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
+            # Groq Llama 3.2 Vision models
+            model = "groq/llama-3.2-11b-vision-preview" 
         else:
             model = "groq/llama-3.3-70b-versatile"
 
@@ -329,18 +310,33 @@ class BasicAgent:
                         res = ""
                         try:
                             execution_trace.set([]) 
-                            if func_name == "websearch": res = search_tool.invoke(args)
-                            elif func_name == "browsersearch": res = browser_tool.invoke(args)
-                            elif func_name == "browserclick": res = click_tool.invoke(args)
-                            elif func_name == "browserback": res = back_tool.invoke({})
-                            elif func_name == "guestinfo": res = guest_info_tool.invoke(args)
-                            elif func_name == "hubstats": res = hub_stats_tool.invoke(args)
+                            if func_name == "websearch": 
+                                res = search_tool.invoke(args)
+                                trace_log(f"Fast Search completed for: {args.get('query')}")
+                            elif func_name == "browsersearch": 
+                                res = browser_tool.invoke(args)
+                                trace_log(f"Deep Search completed for: {args.get('query')}")
+                            elif func_name == "browserclick": 
+                                res = click_tool.invoke(args)
+                                trace_log(f"Browser click successful: {args.get('query')}")
+                            elif func_name == "browserback": 
+                                res = back_tool.invoke({})
+                                trace_log("Browser navigated back.")
+                            elif func_name == "guestinfo": 
+                                res = guest_info_tool.invoke(args)
+                                trace_log(f"Retrieved guest info for: {args.get('query')}")
+                            elif func_name == "hubstats": 
+                                res = hub_stats_tool.invoke(args)
+                                trace_log(f"HuggingFace stats retrieved for {args.get('author')}")
                             elif func_name == "savesession":
-                                if self.user_id == "guest": res = "Saving is not available in guest mode."
+                                if self.user_id == "guest": 
+                                    res = "Saving is not available in guest mode."
                                 else:
                                     self.is_saved = True
                                     res = "Session marked as saved."
-                            else: res = f"Tool '{func_name}' not found."
+                                trace_log("Session save triggered.")
+                            else: 
+                                res = f"Tool '{func_name}' not found."
                             
                             tool_logs = execution_trace.get()
                             for log in tool_logs: reasoning_trace.append(f"› {log}")

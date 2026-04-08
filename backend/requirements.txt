@@ -8,7 +8,7 @@ langchain-community
 langchain-core
 huggingface_hub
 rank_bm25
-duckduckgo-search
+ddgs
 pandas
 openpyxl
 pypdf
