@@ -5,6 +5,7 @@ import urllib.parse
 import random
 import os
 from pydantic import BaseModel, Field
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 # Thread-local storage for real-time logs
 execution_trace = contextvars.ContextVar("execution_trace", default=[])
@@ -14,7 +15,10 @@ def trace_log(msg: str):
     print(msg)
     current_trace = execution_trace.get()
     current_trace.append(msg)
-    execution_trace.set(current_trace)
+from threading import Lock
+
+# Global lock for Helium (not thread-safe)
+browser_lock = Lock()
 
 # ------------------ GLOBAL RETRIEVERS ------------------
 bm25_retriever = None
@@ -55,7 +59,6 @@ def init_pdf_vectorstore(file_path: str):
         documents=chunks,
         embedding=embeddings
     )
-    print(f"Stored {len(chunks)} chunks in Chroma")
     return db
 
 class PDFQuery(BaseModel):
@@ -201,165 +204,143 @@ def browser_search_tool(query: str) -> str:
     """Use this to open a real browser (Chrome) and search using Helium. 
     Ideal for complex info or when search results need more depth.
     Handles Google CAPTCHAs by falling back to DuckDuckGo.
-    (Optimized Extraction)
+    (Optimized Extraction with 20s Timeout)
     """
-    import helium
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.common.by import By
-    try:
-        options = Options()
-        
-        # 🚀 Production Support: Headless mode for cloud environments like Render
-        if os.getenv("RENDER") or os.getenv("HEADLESS") or os.getenv("PORT"):
-            trace_log("Production environment (Render) detected. Enabling hardened headless browser mode...")
-            
-            # Aggressive anti-bot/stealth measures for production
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
-            options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-            options.add_argument("--disable-infobars")
-            options.add_argument("--window-size=1920,1080")
-            options.add_argument("--headless=new")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--disable-gpu")
-        else:
-            options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        
-        # Ensure query is encoded properly
-        encoded_query = urllib.parse.quote(query)
-        search_url = f"https://www.google.com/search?q={encoded_query}"
-        
-        trace_log(f"Opening browser for query: {query}")
-        try:
-            helium.start_chrome(search_url, options=options)
-        except Exception as startup_err:
-            # 🚨 CRITICAL: If start_chrome fails, provide actionable feedback
-            err_msg = str(startup_err)
-            if "executable" in err_msg.lower():
-                return f"Browser Error: Chrome not found in production environment (Render). Ensure the 'render-buildpack-chrome-headless' is added. Details: {err_msg}"
-            return f"Browser Startup Failed: {err_msg}"
-        
-        # Check for CAPTCHA (/sorry)
-        current_url = helium.get_driver().current_url
-        if "/sorry" in current_url or "google.com/sorry" in current_url:
-            trace_log("Google CAPTCHA detected (/sorry). Switching to DuckDuckGo immediately...")
-            helium.go_to(f"https://duckduckgo.com/?q={encoded_query}")
-            # wait a bit for DDG to load
-            time.sleep(2) 
-            for _ in range(10):
-                if "duckduckgo" in helium.get_driver().current_url.lower():
-                    # Wait for results to actually render
-                    try:
-                        driver.find_element(By.ID, 'links')
-                        break
-                    except: pass
-                time.sleep(0.5)
-        
-        # Check for initial content before scrolling to save time
-        driver = helium.get_driver()
-        
-        def extract_content():
-            current_url = driver.current_url
-            txt = ""
-            try:
-                if "google.com" in current_url:
-                    try:
-                        # Google snippet/featured area
-                        featured = driver.find_element(By.CLASS_NAME, 'LGOvwe') 
-                        txt = featured.text + "\n\n"
-                    except: pass
-                    txt += driver.find_element(By.ID, 'search').text
-                elif "duckduckgo.com" in current_url:
-                    txt = driver.find_element(By.ID, 'links').text
-            except: pass
-            return txt if txt else driver.find_element(By.TAG_NAME, 'body').text
-
-        main_text = extract_content()
-        
+    def _execute_browser_search():
+        import helium
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.common.by import By
+        import urllib.parse
+        import os
+        import time
         import re
-        stop_words = {'what', 'is', 'the', 'of', 'how', 'much', 'many', 'does', 'whos', 'who', 'when', 'where', 'in', 'on', 'at', 'to', 'for'}
-        query_words = set(w for w in re.findall(r'\w+', query.lower()) if w not in stop_words)
-        if not query_words: query_words = set(re.findall(r'\w+', query.lower()))
 
-        def get_scored_results(text, driver):
-            blocks = text.split('\n')
-            res = []
-            seen = set()
-            
-            # Extract links and titles properly
-            links_info = []
+        with browser_lock:
             try:
-                # Optimized for Google/DDG result blocks
-                if "google.com" in driver.current_url:
-                    selectors = driver.find_elements(By.CSS_SELECTOR, 'div.g')[:3]
-                    for s in selectors:
-                        try:
-                            title = s.find_element(By.TAG_NAME, 'h3').text
-                            link = s.find_element(By.TAG_NAME, 'a').get_attribute('href')
-                            if title and link: links_info.append(f"• **{title}** [Link: {link}]")
-                        except: pass
-                elif "duckduckgo.com" in driver.current_url:
-                    # Using a more robust selector for DDG headings
-                    selectors = driver.find_elements(By.CSS_SELECTOR, 'a.rn-1pw8f9h')[:3] # DDG result class
-                    if not selectors:
-                        selectors = driver.find_elements(By.CSS_SELECTOR, 'article h2 a')[:3]
-                    
-                    for s in selectors:
-                        try:
-                            title = s.text
-                            link = s.get_attribute('href')
-                            if title and link: links_info.append(f"• **{title}** [Link: {link}]")
-                        except: pass
-            except: pass
-
-            for block in blocks:
-                b = block.strip()
-                if len(b) < 20 or len(b) > 800 or b in seen: continue
-                bl = b.lower()
-                score = 0
-                q_matches = sum(1 for w in query_words if w in bl)
-                score += q_matches * 15
-                if re.search(r'\b(is|has|was|since|total|located|found|scored|won|born|created)\b', bl): score += 10
-                if re.search(r'\d+|\$|₹|percent|million|billion|centur(y|ies)', bl): score += 5
-                # Aggressive Clutter Penalty (Site Names/Nav) - excluding titles we just found
-                if re.search(r'(wikipedia|youtube|facebook|twitter|instagram|linkedin|ago|reactions|share|more|results|people also ask|\?)', bl): score -= 25
-                if b.endswith('...'): score -= 20
+                options = Options()
                 
-                if score > 15:
-                    f = b
-                    for word in query_words:
-                        if len(word) > 3: f = re.sub(f'(?i)({re.escape(word)})', r'**\1**', f)
-                    res.append((score, f"• {f}"))
-                    seen.add(b)
-            
-            res.sort(key=lambda x: x[0], reverse=True)
-            output_blocks = [r[1] for r in res[:4]]
-            
-            if links_info:
-                output_blocks.append("\n**NAVIGATE FURTHER:**\n" + "\n".join(links_info))
-            
-            return output_blocks
+                # 🚀 Production Support: Headless mode for cloud environments like Render
+                if os.getenv("RENDER") or os.getenv("HEADLESS") or os.getenv("PORT"):
+                    trace_log("Production (Render) detected. Enabling hardened headless mode...")
+                    options.add_argument("--disable-blink-features=AutomationControlled")
+                    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                    options.add_experimental_option('useAutomationExtension', False)
+                    options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                    options.add_argument("--disable-infobars")
+                    options.add_argument("--window-size=1920,1080")
+                    options.add_argument("--headless=new")
+                    options.add_argument("--no-sandbox")
+                    options.add_argument("--disable-dev-shm-usage")
+                    options.add_argument("--disable-gpu")
+                else:
+                    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                
+                encoded_query = urllib.parse.quote(query)
+                search_url = f"https://www.google.com/search?q={encoded_query}"
+                
+                trace_log(f"Starting browser search: {query}")
+                try:
+                    helium.start_chrome(search_url, options=options)
+                except Exception as startup_err:
+                    err_msg = str(startup_err)
+                    if "executable" in err_msg.lower():
+                        return f"Browser Error: Chrome not found on Render. Details: {err_msg}"
+                    return f"Browser Startup Failed: {err_msg}"
+                
+                # CAPTCHA Check
+                driver = helium.get_driver()
+                if "/sorry" in driver.current_url or "google.com/sorry" in driver.current_url:
+                    trace_log("Google CAPTCHA. Switching to DuckDuckGo...")
+                    helium.go_to(f"https://duckduckgo.com/?q={encoded_query}")
+                    time.sleep(2) 
+                    for _ in range(10):
+                        if "duckduckgo" in driver.current_url.lower():
+                            try:
+                                driver.find_element(By.ID, 'links')
+                                break
+                            except: pass
+                        time.sleep(0.5)
 
-        unique_results = get_scored_results(main_text, driver)
-        
-        # 🔹 CONDITIONAL SCROLL
-        if len(unique_results) < 3:
-            helium.scroll_down(num_pixels=800)
-            time.sleep(1)
-            main_text = extract_content()
-            unique_results = get_scored_results(main_text, driver)
+                def extract_content():
+                    curr_url = driver.current_url
+                    txt = ""
+                    try:
+                        if "google.com" in curr_url:
+                            try:
+                                txt = driver.find_element(By.CLASS_NAME, 'LGOvwe').text + "\n\n"
+                            except: pass
+                            txt += driver.find_element(By.ID, 'search').text
+                        elif "duckduckgo.com" in curr_url:
+                            txt = driver.find_element(By.ID, 'links').text
+                    except: pass
+                    return txt if txt else driver.find_element(By.TAG_NAME, 'body').text
 
-        if not unique_results:
-            fallback = re.sub(r'\n+', ' ', main_text[:1000])
-            return f"Direct Insight: {fallback}..."
+                main_text = extract_content()
+                
+                stop_words = {'what', 'is', 'the', 'of', 'how', 'much', 'many', 'does', 'whos', 'who'}
+                query_words = set(w for w in re.findall(r'\w+', query.lower()) if w not in stop_words)
+                if not query_words: query_words = set(re.findall(r'\w+', query.lower()))
 
-        return "\n\n".join(unique_results)
-            
-    except Exception as e:
-        print(f"Helium Error: {e}")
-        return f"Browser search failed: {e}"
+                def get_scored_results(text, driver):
+                    blocks = text.split('\n')
+                    res = []
+                    seen = set()
+                    links_info = []
+                    try:
+                        if "google.com" in driver.current_url:
+                            selectors = driver.find_elements(By.CSS_SELECTOR, 'div.g')[:3]
+                            for s in selectors:
+                                try:
+                                    title = s.find_element(By.TAG_NAME, 'h3').text
+                                    link = s.find_element(By.TAG_NAME, 'a').get_attribute('href')
+                                    if title and link: links_info.append(f"• **{title}** [Link: {link}]")
+                                except: pass
+                        elif "duckduckgo.com" in driver.current_url:
+                            selectors = driver.find_elements(By.CSS_SELECTOR, 'article h2 a')[:3]
+                            for s in selectors:
+                                try:
+                                    title = s.text; link = s.get_attribute('href')
+                                    if title and link: links_info.append(f"• **{title}** [Link: {link}]")
+                                except: pass
+                    except: pass
+
+                    for block in blocks:
+                        b = block.strip()
+                        if len(b) < 20 or len(b) > 800 or b in seen: continue
+                        bl = b.lower()
+                        score = sum(15 for w in query_words if w in bl)
+                        if score > 15:
+                            res.append((score, f"• {b}"))
+                            seen.add(b)
+                    
+                    res.sort(key=lambda x: x[0], reverse=True)
+                    output = [r[1] for r in res[:4]]
+                    if links_info: output.append("\n**NAVIGATE FURTHER:**\n" + "\n".join(links_info))
+                    return output
+
+                unique_results = get_scored_results(main_text, driver)
+                if len(unique_results) < 3:
+                    helium.scroll_down(800); time.sleep(1)
+                    unique_results = get_scored_results(extract_content(), driver)
+
+                if not unique_results: return f"Direct Insight: {main_text[:1000]}..."
+                return "\n\n".join(unique_results)
+                    
+            except Exception as e:
+                return f"Browser error: {e}"
+
+    # Wrapper with 20s timeout fallback
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_execute_browser_search)
+        try:
+            return future.result(timeout=20)
+        except TimeoutError:
+            trace_log("!!! Browser Search TIMEOUT (20s). Falling back to Fast Web Search...")
+            # Cleanup browser without the global lock (library level)
+            import helium
+            try: helium.kill_browser()
+            except: pass
+            return search_the_web.invoke({"query": query})
 
 @tool(args_schema=Query)
 def browser_click_tool(query: str) -> str:
@@ -368,40 +349,41 @@ def browser_click_tool(query: str) -> str:
     """
     import helium
     from selenium.webdriver.common.by import By
-    try:
-        if not helium.get_driver():
-            return "No browser window open. Run a search first."
-        
-        print(f"Clicking on: {query}")
-        helium.click(query)
-        time.sleep(2)
-        helium.scroll_down(500)
-        
-        driver = helium.get_driver()
-        main_text = ""
+    with browser_lock:
         try:
-            # Try to find content area to avoid header/footer clutter
-            content_selectors = ['main', 'article', '#content', '#search', '#links']
-            for selector in content_selectors:
-                try:
-                    if selector.startswith('#'):
-                        el = driver.find_element(By.ID, selector[1:])
-                    else:
-                        el = driver.find_element(By.TAG_NAME, selector)
-                    if el.text:
-                        main_text = el.text
-                        break
-                except:
-                    continue
-        except:
-            pass
+            if not helium.get_driver():
+                return "No browser window open. Run a search first."
+            
+            print(f"Clicking on: {query}")
+            helium.click(query)
+            time.sleep(2)
+            helium.scroll_down(500)
+            
+            driver = helium.get_driver()
+            main_text = ""
+            try:
+                # Try to find content area to avoid header/footer clutter
+                content_selectors = ['main', 'article', '#content', '#search', '#links']
+                for selector in content_selectors:
+                    try:
+                        if selector.startswith('#'):
+                            el = driver.find_element(By.ID, selector[1:])
+                        else:
+                            el = driver.find_element(By.TAG_NAME, selector)
+                        if el.text:
+                            main_text = el.text
+                            break
+                    except:
+                        continue
+            except:
+                pass
 
-        if not main_text:
-            main_text = driver.find_element(By.TAG_NAME, 'body').text
+            if not main_text:
+                main_text = driver.find_element(By.TAG_NAME, 'body').text
 
-        return f"Clicked '{query}'. New page summary:\n\n{main_text[:2000]}..."
-    except Exception as e:
-        return f"Click error: {e}"
+            return f"Clicked '{query}'. New page summary:\n\n{main_text[:2000]}..."
+        except Exception as e:
+            return f"Click error: {e}"
 
 @tool
 def browser_back_tool() -> str:
@@ -416,6 +398,15 @@ def browser_back_tool() -> str:
         return "Went back successfully."
     except Exception as e:
         return f"Error going back: {e}"
+
+def helium_kill_browser():
+    """Hard kill the browser to free memory."""
+    import helium
+    with browser_lock:
+        try:
+            helium.kill_browser()
+        except:
+            pass
 
 # Export the underlying functions for calling directly in agent
 # search_tool = search_the_web.func # If langchain version supports it

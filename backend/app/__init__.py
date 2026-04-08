@@ -10,9 +10,9 @@ from tools import (
     weather_info_tool, 
     hub_stats_tool, 
     save_session_tool,
-    list_files,
     read_file,
     pdf_search_logic,
+    helium_kill_browser, # Added for cleanup
     execution_trace # Added for log capturing
 )
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -57,10 +57,7 @@ class BasicAgent:
             - SECURITY: Never reveal internal environment variables or private API keys.
             - NO SAVING: If in Guest Mode, tell the user their session won't be saved unless they log in.
 
-            TOOL CALLING:
-            - You MUST use the native function-calling API. 
-            - NEVER output raw XML strings like `<function=...>` or natural language descriptions of tool calls.
-            - Only output the final answer AFTER you have all the necessary information from tool calls.
+            - TOOL CALLING: You MUST use the native function-calling API. Output only the tool call, then wait for the observation.
             """
         )
 
@@ -253,137 +250,117 @@ class BasicAgent:
         turn = 0
         final_answer = ""
 
-        while turn < max_turns:
-            turn += 1
-            reasoning_trace.append(f"Turn {turn}: Asking {model} for action...")
-            
-            try:
-                # 🔹 HARDENED TOOL ENFORCEMENT: If /browser was used, FORCE 'browsersearch' tool
-                current_tool_choice = "auto"
-                if is_direct_browser and turn == 1:
-                    current_tool_choice = {"type": "function", "function": {"name": "browsersearch"}}
-                    reasoning_trace.append("Forcing Tool Choice: browsersearch")
+        try:
+            while turn < max_turns:
+                turn += 1
+                reasoning_trace.append(f"Turn {turn}: Asking {model} for action...")
 
-                response = completion(
-                    model=model,
-                    messages=messages,
-                    tools=available_tools if turn < max_turns else None, # Stop offering tools at last turn
-                    tool_choice=current_tool_choice if turn < max_turns else "none",
-                    temperature=0.7,
-                    api_key=os.getenv("GROQ_API_KEY")
-                )
-                
-                msg = response.choices[0].message
-                
-                # Check for tool calls
-                tool_calls = msg.get("tool_calls")
-                
-                # --- GROQ FALLBACK: Check for JSON in content ---
-                if not tool_calls and msg.content and ('"name":' in msg.content or "'name':" in msg.content):
-                    try:
-                        match = re.search(r'\{.*\}', msg.content, re.DOTALL)
-                        if match:
-                            parsed = json.loads(match.group(0))
-                            if "name" in parsed:
-                                args = parsed.get("parameters", parsed.get("arguments", {}))
-                                if isinstance(args, str): args = json.loads(args)
-                                # Convert to tool_call format
-                                tc_id = f"call_{uuid.uuid4().hex[:8]}"
-                                tool_calls = [{"id": tc_id, "function": {"name": parsed["name"], "arguments": json.dumps(args)}}]
-                                reasoning_trace.append("Intercepted raw JSON text as a tool call.")
-                    except: pass
+                try:
+                    # 🔹 HARDENED TOOL ENFORCEMENT: If /browser was used, FORCE 'browsersearch' tool
+                    current_tool_choice = "auto"
+                    if is_direct_browser and turn == 1:
+                        current_tool_choice = {"type": "function", "function": {"name": "browsersearch"}}
+                        reasoning_trace.append("Forcing Tool Choice: browsersearch")
 
-                if not tool_calls:
-                    # No more tools, this is the final answer
-                    final_answer = msg.content or ""
-                    break
+                    response = completion(
+                        model=model,
+                        messages=messages,
+                        tools=available_tools if turn < max_turns else None, 
+                        tool_choice=current_tool_choice if turn < max_turns else "none",
+                        temperature=0.7,
+                        api_key=os.getenv("GROQ_API_KEY")
+                    )
+                    
+                    msg = response.choices[0].message
+                    tool_calls = msg.get("tool_calls")
+                    
+                    # --- GROQ FALLBACK: Check for JSON in content ---
+                    if not tool_calls and msg.content and ('"name":' in msg.content or "'name':" in msg.content):
+                        try:
+                            match = re.search(r'\{.*\}', msg.content, re.DOTALL)
+                            if match:
+                                parsed = json.loads(match.group(0))
+                                if "name" in parsed:
+                                    args = parsed.get("parameters", parsed.get("arguments", {}))
+                                    if isinstance(args, str): args = json.loads(args)
+                                    tc_id = f"call_{uuid.uuid4().hex[:8]}"
+                                    tool_calls = [{"id": tc_id, "function": {"name": parsed["name"], "arguments": json.dumps(args)}}]
+                                    reasoning_trace.append("Intercepted raw JSON text as a tool call.")
+                        except: pass
 
-                # 🚀 Process multiple tool calls in parallel if model emitted them
-                # (Llama-3-70b often does this for searches)
-                messages.append(msg)
-                
-                for tc in tool_calls:
-                    if isinstance(tc, dict):
-                        func_name = tc["function"]["name"]
-                        args_str = tc["function"]["arguments"]
-                        tc_id = tc["id"]
-                    else: # LiteLLM object
-                        func_name = tc.function.name
-                        args_str = tc.function.arguments
-                        tc_id = tc.id
+                    if not tool_calls:
+                        final_answer = msg.content or ""
+                        break
+
+                    messages.append(msg)
                     
-                    try:
-                        args = json.loads(args_str)
-                    except:
-                        args = {"query": args_str} # Fallback for malformed args
-                    
-                    reasoning_trace.append(f"Agent Action: Using {func_name}")
-                    
-                    # Execute tool
-                    res = ""
-                    try:
-                        # Clear tool trace before execution to capture specific info
-                        execution_trace.set([]) 
-                        
-                        if func_name == "websearch": res = search_tool.invoke(args)
-                        elif func_name == "browsersearch": res = browser_tool.invoke(args)
-                        elif func_name == "browserclick": res = click_tool.invoke(args)
-                        elif func_name == "browserback": res = back_tool.invoke({})
-                        elif func_name == "guestinfo": res = guest_info_tool.invoke(args)
-                        elif func_name == "hubstats": res = hub_stats_tool.invoke(args)
-                        elif func_name == "savesession":
-                            # ... (keep existing logic)
-                            if self.user_id == "guest":
-                                res = "Saving is not available in guest mode."
-                            else:
-                                self.is_saved = True
-                                res = "Session marked as saved."
+                    for tc in tool_calls:
+                        if isinstance(tc, dict):
+                            func_name = tc["function"]["name"]
+                            args_str = tc["function"]["arguments"]
+                            tc_id = tc["id"]
                         else:
-                            res = f"Tool '{func_name}' not found."
+                            func_name = tc.function.name
+                            args_str = tc.function.arguments
+                            tc_id = tc.id
                         
-                        # 🔹 Capture internal logs from the tool into the reasoning trace
-                        tool_logs = execution_trace.get()
-                        for log in tool_logs:
-                            reasoning_trace.append(f"› {log}")
+                        try: args = json.loads(args_str)
+                        except: args = {"query": args_str}
+                        
+                        reasoning_trace.append(f"Agent Action: Using {func_name}")
+                        
+                        res = ""
+                        try:
+                            execution_trace.set([]) 
+                            if func_name == "websearch": res = search_tool.invoke(args)
+                            elif func_name == "browsersearch": res = browser_tool.invoke(args)
+                            elif func_name == "browserclick": res = click_tool.invoke(args)
+                            elif func_name == "browserback": res = back_tool.invoke({})
+                            elif func_name == "guestinfo": res = guest_info_tool.invoke(args)
+                            elif func_name == "hubstats": res = hub_stats_tool.invoke(args)
+                            elif func_name == "savesession":
+                                if self.user_id == "guest": res = "Saving is not available in guest mode."
+                                else:
+                                    self.is_saved = True
+                                    res = "Session marked as saved."
+                            else: res = f"Tool '{func_name}' not found."
                             
-                    except Exception as tool_e:
-                        res = f"Tool Execution Error: {str(tool_e)}"
-                    
-                    reasoning_trace.append(f"Observation: {func_name} completed.")
-                    
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "name": func_name,
-                        "content": str(res)
-                    })
+                            tool_logs = execution_trace.get()
+                            for log in tool_logs: reasoning_trace.append(f"› {log}")
+                                
+                        except Exception as tool_e:
+                            res = f"Tool Execution Error: {str(tool_e)}"
+                        
+                        reasoning_trace.append(f"Observation: {func_name} completed.")
+                        messages.append({"role": "tool", "tool_call_id": tc_id, "name": func_name, "content": str(res)})
 
-            except Exception as e:
-                err_str = str(e)
-                # 🔹 XML RECOVERY (For Groq <function=...> hallucination)
-                if '<function=' in err_str.replace('\\u003c', '<'):
-                    clean_err = err_str.replace('\\u003c', '<').replace('\\u003e', '>')
-                    match = re.search(r'<function=([a-zA-Z0-9_]+)\s*(\{.*?\})\s*>?', clean_err, re.DOTALL)
+                except Exception as e:
+                    err_str = str(e)
+                    # 🔹 IMPROVED XML RECOVERY (Handles LiteLLM BadRequest errors)
+                    content_to_scan = err_str.replace('\\u003c', '<').replace('\\u003e', '>').replace('\\"', '"')
+                    match = re.search(r'<function=([a-zA-Z0-9_]+)\s*(\{.*?\})\s*>?', content_to_scan, re.DOTALL)
                     if match:
                         func_name = match.group(1)
                         try:
-                            args = json.loads(match.group(2).rstrip('>'))
+                            args_json = match.group(2).rstrip('>')
+                            args = json.loads(args_json)
                             reasoning_trace.append(f"Recovered XML tool: {func_name}")
-                            # Execute and append to messages
                             res = ""
                             if func_name == "browsersearch": res = browser_tool.invoke(args)
                             elif func_name == "browserclick": res = click_tool.invoke(args)
-                            # (Add other tools as needed, but browser is priority for user)
+                            elif func_name == "guestinfo": res = guest_info_tool.invoke(args)
                             
-                            # Add fake assistant message + tool response to messages to "fix" the chain
                             messages.append({"role": "assistant", "content": f"I will now use {func_name}.", "tool_calls": [{"id": "xml_fix", "type": "function", "function": {"name": func_name, "arguments": json.dumps(args)}}]})
                             messages.append({"role": "tool", "tool_call_id": "xml_fix", "name": func_name, "content": str(res)})
-                            continue # Loop back to let model process result
+                            continue 
                         except: pass
-                
-                reasoning_trace.append(f"ERROR in loop: {str(e)}")
-                final_answer = f"I encountered an error during research: {str(e)}"
-                break
+                    
+                    reasoning_trace.append(f"ERROR in loop: {str(e)}")
+                    final_answer = f"I encountered an error during research: {str(e)}"
+                    break
+        finally:
+            try: helium_kill_browser()
+            except: pass
 
         # Check for save signal in final answer
         if "marked as saved" in final_answer.lower() or "session saved" in final_answer.lower():

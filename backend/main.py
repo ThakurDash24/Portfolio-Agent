@@ -622,7 +622,7 @@ def update_thread_title(thread_id: str, payload: ThreadTitleUpdate, user_id: str
     return {"message": "Title updated"}
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
+def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
     text = req.message.strip()
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
