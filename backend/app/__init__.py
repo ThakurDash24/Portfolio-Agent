@@ -35,11 +35,12 @@ class BasicAgent:
             - Focus: ML Pipelines, GenAI, Agentic Systems, and Backend Architectures.
             - Your goal is to be a practical, execution-oriented builder.
 
-            ANTI-HALLUCINATION GUARDRAILS:
-            1. STRICT GROUNDING: If a user asks for a fact (date, net worth, tech spec, news) and you don't already have it in your immediate context, you MUST use a tool. DO NOT guess.
-            2. NO FABRICATION: Never invent URLs, GitHub links, or project details. If a search tool returns no results, state clearly: "I couldn't find a reliable source for that. Would you like me to try a different search?"
-            3. SOURCE FIDELITY: Only provide links and quotes that were actually returned by the 'websearch' or 'browsersearch' tools. 
-            4. UNCERTAINTY: It is better to say "I don't know" or "Let me investigate that further" than to provide a plausible-sounding lie.
+            ANTI-HALLUCINATION GUARDRAILS (STRICT):
+            1. FAITHFULNESS OVER FLUENCY: It is an absolute failure to provide an answer that sounds correct but is unverified.
+            2. TOOL-FIRST: For ANY factual claim (dates, tech stacks, external metrics, news), you MUST execute a tool first. 
+            3. SOURCE ATTRIBUTION: Every fact must be traceable to a tool observation. If a tool returns "No data" or "Error", convey that status rather than bridging the gap with your training data.
+            4. IDENTITY LOCK: You are Laven, representing Thakur Dash. Avoid generic AI responses or claiming capabilities not verified by your tools.
+            5. VERIFICATION: Before concluding, perform a mental check: "Did I search for this? Is this in the PDF? Is this in the Guest Dataset?" if No, use a tool now.
 
             COMMUNICATION PROTOCOL:
             - Tone: Calm, confident, engineering-focused. No "I am a language model" fluff.
@@ -49,8 +50,8 @@ class BasicAgent:
             BROWSER & SEARCH PROTOCOL:
             - QUICK SEARCH: Use 'websearch' for simple facts or math.
             - DEEP RESEARCH: Use 'browsersearch' for complex queries, live news, or hidden data.
-            - REAL BROWSER: The browser is a HEADLESS server-side instance. You "see" the raw text and links. 
-            - ITERATION: If the first search is insufficient, use 'browserclick' to explore specific links or 'browsersearch' with a better query.
+            - REAL BROWSER: The browser is a HEADLESS server-side instance. Use 'browserclick' to navigate if the search snippet is shallow.
+            - ITERATION: If the first search is insufficient, use 'browsersearch' with a better query.
 
             GUEST_CHAT & PRIVACY:
             - GUEST_MODE: Active if the user is a guest. Sessions are temporary and in-memory.
@@ -88,24 +89,33 @@ class BasicAgent:
             
         msgs = [{"role": "system", "content": system_prompt}]
         
-        # Add history
+        # Add history with strict role-alternation enforcement (fixes legacy broken threads)
         history = self.get_historical_messages()
+        last_added_role = "system"
+        
         for m in history:
             if isinstance(m, dict):
                 m_to_add = m.copy()
-                # 1. Ensure content is a string if it's None (Groq requirement)
+                role = m_to_add.get("role", "assistant")
+                
+                # 1. Skip consecutive identical roles (except tool turns)
+                if role == last_added_role and role != "tool":
+                    continue
+                    
+                # 2. Ensure content is a string if it's None (Groq requirement)
                 if m_to_add.get("content") is None:
                     m_to_add["content"] = ""
                 
-                # 2. 🔹 GROQ COMPATIBILITY: If current turn is text-only, flatten historical lists
-                # This prevents index errors/validation errors when mixing vision and non-vision turns
+                # 3. 🔹 GROQ COMPATIBILITY: If current turn is text-only, flatten historical lists
                 if not images and isinstance(m_to_add.get("content"), list):
                     text_parts = [p.get("text", "") for p in m_to_add["content"] if isinstance(p, dict) and p.get("type") == "text"]
                     m_to_add["content"] = " ".join(text_parts).strip()
                 
                 msgs.append(m_to_add)
+                last_added_role = role
             else:
                 msgs.append({"role": "assistant", "content": str(m)})
+                last_added_role = "assistant"
         
         # Add current user message
         if images and len(images) > 0:
@@ -117,6 +127,13 @@ class BasicAgent:
                 })
         else:
             content = text
+            
+        # Final check: If last added role was 'user', we might need to inject a dummy assistant message 
+        # but usually we just skip adding if it's a duplicate, or Llama 3 will complain.
+        if last_added_role == "user":
+            # This shouldn't happen with our cleanser, but for safety:
+            msgs.append({"role": "assistant", "content": "I understand. Please continue."})
+        
         msgs.append({"role": "user", "content": content})
         
         return msgs
@@ -243,7 +260,7 @@ class BasicAgent:
         if images:
             model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
         else:
-            model = "groq/llama-3.3-70b-versatile"
+            model = "groq/gpt-oss-120b"
 
         # 🔹 AGENTIC LOOP (Up to 5 turns)
         max_turns = 5
@@ -367,28 +384,35 @@ class BasicAgent:
             self.is_saved = True
 
         # Update History
-        exchange = []
-        if images and len(images) > 0:
-            user_msg = {"role": "user", "content": [{"type": "text", "text": text}]}
-            for img in images: user_msg["content"].append({"type": "image_url", "image_url": {"url": img}})
-        else:
-            user_msg = {"role": "user", "content": text}
-        exchange.append(user_msg)
+        # We want to add only the NEW turns to the historical record.
+        # Historical messages already in the thread are at indices 1 to N in the 'messages' list.
+        # The new User message is at index N+1.
+        # Subsequent agent/tool turns follow.
         
-        # Add all intermediate turns to history
-        start_idx = len(self.get_historical_messages()) + 1 # +1 for system message
-        for m in messages[start_idx:]:
-            # Clean up litellm objects for history storage
-            if hasattr(m, "get"):
-                exchange.append(m)
-            else:
-                # Handle LiteLLM message objects
-                m_dict = {"role": m.role, "content": m.content or ""}
+        new_history_start = len(self.get_historical_messages()) + 1 # +1 to skip original system prompt
+        new_turns = []
+        
+        for m in messages[new_history_start:]:
+            # 1. Clean up LiteLLM message objects and skip mid-conversation system noise
+            if hasattr(m, "role"):
+                role = m.role
+                content = m.content or ""
+                # Skip mid-turn system instructions from history to keep it clean for Groq
+                if role == "system":
+                    continue
+                
+                m_dict = {"role": role, "content": content}
                 if hasattr(m, "tool_calls") and m.tool_calls:
                     m_dict["tool_calls"] = m.tool_calls
-                exchange.append(m_dict)
+                if hasattr(m, "tool_call_id") and m.tool_call_id:
+                    m_dict["tool_call_id"] = m.tool_call_id
+                new_turns.append(m_dict)
+            elif isinstance(m, dict):
+                if m.get("role") == "system":
+                    continue
+                new_turns.append(m)
 
-        self.threads[self.current_thread_id]["messages"].extend(exchange)
+        self.threads[self.current_thread_id]["messages"].extend(new_turns)
         formatted_reasoning = "\n".join([f"› {s}" for s in reasoning_trace])
         
         return final_answer, formatted_reasoning
