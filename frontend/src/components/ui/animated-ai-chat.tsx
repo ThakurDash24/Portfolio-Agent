@@ -84,6 +84,8 @@ interface CommandSuggestion {
     label: string;
     description: string;
     prefix: string;
+    id?: string;
+    comingSoon?: boolean;
 }
 
 interface TextareaProps
@@ -222,14 +224,16 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
             label: "Clone UI",
             description: "Generate a UI from a screenshot",
             prefix: "/clone",
-            id: "clone"
+            id: "clone",
+            comingSoon: true
         },
         {
             icon: <MonitorIcon className="w-4 h-4" />,
             label: "Create Page",
             description: "Generate a new web page",
             prefix: "/page",
-            id: "page"
+            id: "page",
+            comingSoon: true
         },
     ].filter(cmd => !(cmd.id === 'browser' && isMobile)), [isMobile]);
 
@@ -983,18 +987,28 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                                                 <div
                                                     key={suggestion.prefix}
                                                     className={cn(
-                                                        "flex items-center gap-4 px-5 py-4 text-xs transition-all cursor-pointer",
-                                                        activeSuggestion === index
+                                                        "flex items-center gap-4 px-5 py-4 text-xs transition-all",
+                                                        suggestion.comingSoon 
+                                                            ? "opacity-60 cursor-not-allowed grayscale-[0.5]" 
+                                                            : "cursor-pointer",
+                                                        activeSuggestion === index && !suggestion.comingSoon
                                                             ? "bg-violet-500/20 text-white"
                                                             : "text-white/40 hover:bg-white/5 hover:text-white/70"
                                                     )}
-                                                    onClick={() => selectCommandSuggestion(index)}
+                                                    onClick={() => !suggestion.comingSoon && selectCommandSuggestion(index)}
                                                 >
                                                     <div className="p-2.5 rounded-xl bg-white/5">
                                                         {suggestion.icon}
                                                     </div>
-                                                    <div className="flex flex-col">
-                                                        <span className="font-semibold tracking-wide text-sm">{suggestion.label}</span>
+                                                    <div className="flex flex-col flex-1">
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="font-semibold tracking-wide text-sm">{suggestion.label}</span>
+                                                            {suggestion.comingSoon && (
+                                                                <span className="text-[8px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20 font-bold uppercase tracking-widest">
+                                                                    Coming Soon
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         <span className="text-[10px] opacity-40 uppercase tracking-tighter">{suggestion.description}</span>
                                                     </div>
                                                 </div>
