@@ -1,9 +1,20 @@
+import contextvars
 from langchain_core.tools import tool
 import time
 import urllib.parse
 import random
 import os
 from pydantic import BaseModel, Field
+
+# Thread-local storage for real-time logs
+execution_trace = contextvars.ContextVar("execution_trace", default=[])
+
+def trace_log(msg: str):
+    """Log a message to the shared trace and print to console."""
+    print(msg)
+    current_trace = execution_trace.get()
+    current_trace.append(msg)
+    execution_trace.set(current_trace)
 
 # ------------------ GLOBAL RETRIEVERS ------------------
 bm25_retriever = None
@@ -200,7 +211,7 @@ def browser_search_tool(query: str) -> str:
         
         # 🚀 Production Support: Headless mode for cloud environments like Render
         if os.getenv("RENDER") or os.getenv("HEADLESS") or os.getenv("PORT"):
-            print("Production environment (Render) detected. Enabling hardened headless browser mode...")
+            trace_log("Production environment (Render) detected. Enabling hardened headless browser mode...")
             
             # Aggressive anti-bot/stealth measures for production
             options.add_argument("--disable-blink-features=AutomationControlled")
@@ -220,7 +231,7 @@ def browser_search_tool(query: str) -> str:
         encoded_query = urllib.parse.quote(query)
         search_url = f"https://www.google.com/search?q={encoded_query}"
         
-        print(f"Opening browser for query: {query}")
+        trace_log(f"Opening browser for query: {query}")
         try:
             helium.start_chrome(search_url, options=options)
         except Exception as startup_err:
@@ -233,7 +244,7 @@ def browser_search_tool(query: str) -> str:
         # Check for CAPTCHA (/sorry)
         current_url = helium.get_driver().current_url
         if "/sorry" in current_url or "google.com/sorry" in current_url:
-            print("Google CAPTCHA detected (/sorry). Switching to DuckDuckGo immediately...")
+            trace_log("Google CAPTCHA detected (/sorry). Switching to DuckDuckGo immediately...")
             helium.go_to(f"https://duckduckgo.com/?q={encoded_query}")
             # wait a bit for DDG to load
             time.sleep(2) 
