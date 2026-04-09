@@ -122,16 +122,36 @@ def init_guest_retriever(docs):
     global guest_retriever
     guest_retriever = BM25Retriever.from_documents(docs)
 
+
 # ------------------ SCHEMAS ------------------
 class Query(BaseModel):
     query: str = Field(description="Query string")
 
+class SearchQuery(BaseModel):
+    query: str = Field(description="Search query for real-time or unknown info")
+
+class GuestQuery(BaseModel):
+    query: str = Field(description="Guest name or relation")
+
+class WeatherQuery(BaseModel):
+    location: str = Field(description="City or location")
+
+class HubStatsQuery(BaseModel):
+    author: str = Field(description="HuggingFace username")
+
+class FilePathQuery(BaseModel):
+    file_path: str = Field(description="Safe relative file path")
+
+class DirectoryQuery(BaseModel):
+    directory: str = Field(default=".", description="Directory path")
+
 # ------------------ TOOLS ------------------
+
 
 # --- GUEST DATA TOOL ---
 @tool(args_schema=GuestQuery)
 def guest_info_tool(query: str) -> str:
-    \"\"\"Use this to search internal dataset for info about Thakur Dash, his projects, or guest lists.\"\"\"
+    """Use this to search internal dataset for info about Thakur Dash, his projects, or guest lists."""
     global bm25_retriever
 
     if bm25_retriever is None:
