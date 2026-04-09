@@ -616,7 +616,8 @@ def update_thread_title(thread_id: str, payload: ThreadTitleUpdate, user_id: str
     if _SUPABASE_ENABLED:
         try:
             _sb.table("chat_threads").update({"title": payload.title}).eq("id", thread_id).execute()
-                print(f"[Supabase] Title update failed: {e}")
+        except Exception as e:
+            print(f"[Supabase] Title update failed: {e}")
 
     return {"message": "Title updated"}
 
