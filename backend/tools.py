@@ -128,13 +128,26 @@ class Query(BaseModel):
 
 # ------------------ TOOLS ------------------
 
-@tool(args_schema=Query)
+# --- GUEST DATA TOOL ---
+@tool(args_schema=GuestQuery)
 def guest_info_tool(query: str) -> str:
-    """Use ONLY for guest/person info (name, relation, description)."""
-    if guest_retriever is None:
-        return "Guest retriever not initialized"
-    results = guest_retriever.invoke(query)
-    return "\n\n".join([doc.page_content for doc in results[:3]]) or "No data"
+    \"\"\"Use this to search internal dataset for info about Thakur Dash, his projects, or guest lists.\"\"\"
+    global bm25_retriever
+
+    if bm25_retriever is None:
+        # Fallback: if asked about Thakur Dash and retriever is not yet ready,
+        # return basic info since he is the creator.
+        if "thakur" in query.lower() or "creator" in query.lower():
+            return "Thakur Dash is a Machine Learning Engineer and the creator of this portfolio. He specializes in GenAI and Backend systems."
+        return "Internal data retriever not initialized yet."
+
+    try:
+        results = bm25_retriever.invoke(query)
+        if not results:
+            return "No specific data found in internal records."
+        return "\n\n".join([doc.page_content for doc in results[:3]])
+    except Exception as e:
+        return f"Retriever error: {str(e)}"
 
 
 # ------------------ INIT ------------------
@@ -164,21 +177,7 @@ class DirectoryQuery(BaseModel):
 
 # ------------------ TOOLS ------------------
 
-@tool(args_schema=GuestQuery)
-def guest_info_retriever(query: str) -> str:
-    """Use this ONLY when asked about a guest or person from dataset."""
-    global bm25_retriever
-
-    if bm25_retriever is None:
-        raise ValueError("Retriever not initialized")
-
-    results = bm25_retriever.invoke(query)
-    if not results:
-        return "No data found"
-
-    return "\n\n".join([doc.page_content for doc in results[:3]])
-
-guest_info_tool = guest_info_retriever
+# guest_info_tool is already defined above
 
 
 @tool(args_schema=SearchQuery)
