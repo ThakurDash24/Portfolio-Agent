@@ -616,10 +616,47 @@ def update_thread_title(thread_id: str, payload: ThreadTitleUpdate, user_id: str
     if _SUPABASE_ENABLED:
         try:
             _sb.table("chat_threads").update({"title": payload.title}).eq("id", thread_id).execute()
-        except Exception as e:
-            print(f"[Supabase] Title update failed: {e}")
+                print(f"[Supabase] Title update failed: {e}")
 
     return {"message": "Title updated"}
+
+
+@app.post("/guest/chat", response_model=ChatResponse)
+def guest_chat(req: ChatRequest):
+    """
+    Dedicated endpoint for the portfolio widget.
+    Always uses 'guest' identity and requires zero authorization headers.
+    """
+    if not req.message or not req.message.strip():
+        raise HTTPException(status_code=400, detail="message is required")
+
+    user_id = "guest"
+    thread_id = req.thread_id or uuid.uuid4().hex
+    
+    # 1. Get/Initialize guest session
+    session = get_session(thread_id, user_id)
+    agent = session["agent"]
+    
+    # 2. Bind agent to thread_id
+    agent.switch_thread(thread_id)
+    
+    try:
+        # 3. Call Laven agent
+        response, reasoning_trace = agent(req.message.strip(), images=req.images)
+        
+        return ChatResponse(
+            response=response, 
+            reasoning_trace=reasoning_trace,
+            thread_id=thread_id,
+            title=session.get("title", "Portfolio Chat"),
+            saved=False, # Guests are never saved
+            has_pdf=agent.has_pdf,
+            has_image=agent.has_image
+        )
+    except Exception as e:
+        print(f"Guest Chat Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
