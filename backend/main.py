@@ -65,7 +65,7 @@ def save_sessions_to_db():
     import json as _json
 
     for tid, s in _sessions.items():
-        # 🚀 Guest Protection: Never save guest sessions to the database
+        #  Guest Protection: Never save guest sessions to the database
         if s.get("user_id") == "guest":
             continue
             
@@ -128,7 +128,7 @@ def restore_thread_into_memory(thread_id: str, user_id: Optional[str] = None):
     try:
         # Check thread table
         query = _sb.table("chat_threads").select("*").eq("id", thread_id)
-        if user_id is not None:
+        if user_id is not None and user_id != "guest":
             query = query.eq("user_id", user_id)
         
         t_res = query.execute()
@@ -519,7 +519,7 @@ def new_thread(user_id: str = Depends(get_optional_user)):
 @app.get("/thread/{thread_id}")
 def get_thread(thread_id: str, user_id: str = Depends(get_optional_user)):
     # Verify ownership before returning
-    if _SUPABASE_ENABLED:
+    if _SUPABASE_ENABLED and user_id != "guest":
         try:
             res = _sb.table("chat_threads").select("id").eq("id", thread_id).eq("user_id", user_id).execute()
             if not res.data:
@@ -655,6 +655,17 @@ def guest_chat(req: ChatRequest):
             has_image=agent.has_image
         )
     except Exception as e:
+        err = str(e)
+        if "RateLimitError" in err or "rate_limit_exceeded" in err:
+            return ChatResponse(
+                response="I’m temporarily rate-limited. Please retry in a few seconds.",
+                reasoning_trace=err,
+                thread_id=thread_id,
+                title=session.get("title", "Portfolio Chat"),
+                saved=False,
+                has_pdf=agent.has_pdf,
+                has_image=agent.has_image,
+            )
         print(f"Guest Chat Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -726,6 +737,17 @@ def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
             has_image=agent.has_image
         )
     except Exception as e:
+        err = str(e)
+        if "RateLimitError" in err or "rate_limit_exceeded" in err:
+            return ChatResponse(
+                response="I’m temporarily rate-limited. Please retry in a few seconds.",
+                reasoning_trace=err,
+                thread_id=thread_id,
+                title=session["title"],
+                saved=session.get("saved", False) or agent.is_saved,
+                has_pdf=agent.has_pdf,
+                has_image=agent.has_image,
+            )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 # No SPA fallback needed for backend-only deployment.

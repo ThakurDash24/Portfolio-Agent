@@ -13,6 +13,7 @@ from tools import (
     read_file,
     pdf_search_logic,
     helium_kill_browser, # Added for cleanup
+    trace_log,
     execution_trace # Added for log capturing
 )
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -146,12 +147,49 @@ class BasicAgent:
         
         return msgs
 
+    def _is_tool_capability_query(self, text: str) -> bool:
+        lowered = text.lower()
+        return any(
+            phrase in lowered
+            for phrase in [
+                "how many tool",
+                "how many tools",
+                "tool access",
+                "what tools",
+                "which tools",
+                "available tools",
+                "tool list",
+            ]
+        )
+
     def __call__(self, text: str, images: Optional[List[str]] = None) -> Tuple[str, str]:
         if not self.current_thread_id:
             raise ValueError("No thread selected. Call switch_thread first.")
 
         reasoning_trace = []
         execution_trace.set([]) # Clear trace at start of each call
+
+        if self._is_tool_capability_query(text):
+            tool_names = [
+                "websearch",
+                "browsersearch",
+                "guestinfo",
+                "browserclick",
+                "browserback",
+                "hubstats",
+                "savesession",
+            ]
+            answer = (
+                f"I have access to {len(tool_names)} tools: "
+                + ", ".join(tool_names)
+                + ".\n"
+                + ("Note: savesession is disabled in guest mode." if self.user_id == "guest" else "")
+            ).strip()
+            reasoning = "\n".join([
+                "› Tool-capability question detected.",
+                f"› Returning a direct answer with {len(tool_names)} tools.",
+            ])
+            return answer, reasoning
         
         # 🔹 ENFORCE BROWSER LOGIC: If user uses /browser, we MUST start with browsersearch
         is_direct_browser = text.lower().startswith("/browser ")
@@ -267,12 +305,12 @@ class BasicAgent:
 
         if images:
             # Llama 4 Scout Vision model
-            model = "meta-llama/llama-4-scout-17b-16e-instruct" 
+            model = "groq/meta-llama/llama-4-scout-17b-16e-instruct" 
         else:
-            model = "groq/llama-3.3-70b-versatile"
+            model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
 
         # 🔹 AGENTIC LOOP (Up to 5 turns)
-        max_turns = 5
+        max_turns = 3
         turn = 0
         final_answer = ""
 
@@ -293,7 +331,7 @@ class BasicAgent:
                         messages=messages,
                         tools=available_tools if turn < max_turns else None, 
                         tool_choice=current_tool_choice if turn < max_turns else "none",
-                        temperature=0.7,
+                        temperature=0.0,
                         api_key=os.getenv("GROQ_API_KEY")
                     )
                     
@@ -377,13 +415,24 @@ class BasicAgent:
 
                 except Exception as e:
                     err_str = str(e)
+                    if "RateLimitError" in err_str or "rate_limit_exceeded" in err_str:
+                        reasoning_trace.append(f"ERROR in loop: {err_str}")
+                        final_answer = "I’m temporarily rate-limited. Please retry in a few seconds."
+                        break
                     # 🔹 IMPROVED XML RECOVERY (Handles LiteLLM BadRequest errors)
                     content_to_scan = err_str.replace('\\u003c', '<').replace('\\u003e', '>').replace('\\"', '"')
-                    match = re.search(r'<function=([a-zA-Z0-9_]+)\s*(\{.*?\})\s*>?', content_to_scan, re.DOTALL)
+                    match = re.search(
+                        r'<function=([a-zA-Z0-9_]+)=?(\{.*\})(?:>)?\s*</function>',
+                        content_to_scan,
+                        re.DOTALL,
+                    )
+                    if not match:
+                        match = re.search(r"attempted to call tool '([a-zA-Z0-9_]+)(\{.*?\})'", content_to_scan)
+                        
                     if match:
                         func_name = match.group(1)
                         try:
-                            args_json = match.group(2).rstrip('>')
+                            args_json = match.group(2).strip().rstrip('>')
                             args = json.loads(args_json)
                             reasoning_trace.append(f"Recovered XML tool: {func_name}")
                             res = ""
@@ -396,6 +445,11 @@ class BasicAgent:
                             continue 
                         except: pass
                     
+                    if "tool_use_failed" in err_str or "failed_generation" in err_str:
+                        reasoning_trace.append(f"ERROR in loop: {err_str}")
+                        final_answer = "I had trouble calling a tool. Please retry the request."
+                        break
+
                     reasoning_trace.append(f"ERROR in loop: {str(e)}")
                     final_answer = f"I encountered an error during research: {str(e)}"
                     break
