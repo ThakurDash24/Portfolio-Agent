@@ -30,7 +30,7 @@ def get_current_user(authorization: str = Header(...)) -> str:
             token,
             secret,
             algorithms=["HS256", "RS256", "ES256", "HS512", "HS384"],
-            options={"verify_aud": False, "verify_signature": False},   # Bypass signature check since secret format mismatched
+            options={"verify_aud": False},
         )
 
         user_id: str | None = payload.get("sub")

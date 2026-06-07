@@ -202,12 +202,12 @@ class BasicAgent:
         if is_direct_browser:
             messages.append({"role": "system", "content": "CRITICAL: The user explicitly wants a REAL BROWSER search. You MUST use the 'browsersearch' tool. Do NOT use 'websearch'."})
 
-        # 1. Initial Thought/PDF Context
-        if self.vector_db and ("pdf" in text.lower() or "file" in text.lower() or "document" in text.lower()):
-            reasoning_trace.append("Detected PDF query. Searching document vectors...")
+        # 1. Initial Thought/PDF Context — always inject context when a PDF is loaded
+        if self.vector_db:
+            reasoning_trace.append("PDF loaded. Searching document vectors for relevant context...")
             search_context = pdf_search_logic(self.vector_db, text)
-            messages.append({"role": "system", "content": f"Context from PDF: {search_context}"})
-            reasoning_trace.append(f"Retrieved relevant chunks from the uploaded PDF.")
+            messages.append({"role": "system", "content": f"Context from uploaded PDF:\n{search_context}"})
+            reasoning_trace.append("Retrieved relevant chunks from the uploaded PDF.")
 
         # 2. Define tools
         available_tools = [
@@ -303,11 +303,7 @@ class BasicAgent:
         import json
         import re
 
-        if images:
-            # Llama 4 Scout Vision model
-            model = "groq/meta-llama/llama-4-scout-17b-16e-instruct" 
-        else:
-            model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
+        model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
 
         # 🔹 AGENTIC LOOP (Up to 5 turns)
         max_turns = 3

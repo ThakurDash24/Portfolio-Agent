@@ -18,7 +18,6 @@ from auth import get_current_user, get_optional_user
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
-import uuid
 
 load_dotenv()
 
@@ -610,7 +609,9 @@ def update_thread_title(thread_id: str, payload: ThreadTitleUpdate, user_id: str
             print(f"[Supabase] Ownership check failed: {e}")
 
     if thread_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Thread not found")
+        restored = restore_thread_into_memory(thread_id, user_id)
+        if not restored:
+            raise HTTPException(status_code=404, detail="Thread not found")
     _sessions[thread_id]["title"] = payload.title
 
     if _SUPABASE_ENABLED:

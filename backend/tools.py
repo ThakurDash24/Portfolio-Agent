@@ -176,27 +176,6 @@ def init_retriever(docs_list):
     global bm25_retriever
     bm25_retriever = BM25Retriever.from_documents(docs_list)
 
-# ------------------ SCHEMAS ------------------
-class SearchQuery(BaseModel):
-    query: str = Field(description="Search query for real-time or unknown info")
-
-class GuestQuery(BaseModel):
-    query: str = Field(description="Guest name or relation")
-
-class WeatherQuery(BaseModel):
-    location: str = Field(description="City or location")
-
-class HubStatsQuery(BaseModel):
-    author: str = Field(description="HuggingFace username")
-
-class FilePathQuery(BaseModel):
-    file_path: str = Field(description="Safe relative file path")
-
-class DirectoryQuery(BaseModel):
-    directory: str = Field(default=".", description="Directory path")
-
-# ------------------ TOOLS ------------------
-
 # guest_info_tool is already defined above
 
 

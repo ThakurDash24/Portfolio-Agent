@@ -668,11 +668,10 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
             });
             setMessages(loadedMessages);
             setCurrentThreadId(id);
-            setIsSaved(data.saved); // Correctly reflect saved status from backend
+            setIsSaved(data.saved || false);
             setCurrentHasPdf(data.has_pdf || false);
             setCurrentHasPhoto(data.has_image || false);
             textareaRef.current?.focus();
-            setIsSaved(data.saved || false);
             setShowSidebar(false);
         } catch (e) {
             console.error("Failed to load thread", e);
