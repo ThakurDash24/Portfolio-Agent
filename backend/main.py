@@ -495,7 +495,8 @@ def new_thread(user_id: str = Depends(get_optional_user)):
     _sessions[tid] = {
         "agent": agent,
         "title": "New Chat",
-        "saved": False
+        "saved": False,
+        "user_id": user_id,
     }
     _sessions[tid]["agent"].create_thread(tid)
 

@@ -189,6 +189,8 @@ class BasicAgent:
                 "› Tool-capability question detected.",
                 f"› Returning a direct answer with {len(tool_names)} tools.",
             ])
+            self.threads[self.current_thread_id]["messages"].append({"role": "user", "content": text})
+            self.threads[self.current_thread_id]["messages"].append({"role": "assistant", "content": answer})
             return answer, reasoning
         
         # 🔹 ENFORCE BROWSER LOGIC: If user uses /browser, we MUST start with browsersearch
@@ -206,7 +208,8 @@ class BasicAgent:
         if self.vector_db:
             reasoning_trace.append("PDF loaded. Searching document vectors for relevant context...")
             search_context = pdf_search_logic(self.vector_db, text)
-            messages.append({"role": "system", "content": f"Context from uploaded PDF:\n{search_context}"})
+            # Insert before the last (user) message so system messages precede user turns
+            messages.insert(-1, {"role": "system", "content": f"Context from uploaded PDF:\n{search_context}"})
             reasoning_trace.append("Retrieved relevant chunks from the uploaded PDF.")
 
         # 2. Define tools
@@ -423,7 +426,7 @@ class BasicAgent:
                         re.DOTALL,
                     )
                     if not match:
-                        match = re.search(r"attempted to call tool '([a-zA-Z0-9_]+)(\{.*?\})'", content_to_scan)
+                        match = re.search(r"attempted to call tool '([a-zA-Z0-9_]+)(\{.*?\})'", content_to_scan, re.DOTALL)
                         
                     if match:
                         func_name = match.group(1)
@@ -435,6 +438,8 @@ class BasicAgent:
                             if func_name == "browsersearch": res = browser_tool.invoke(args)
                             elif func_name == "browserclick": res = click_tool.invoke(args)
                             elif func_name == "guestinfo": res = guest_info_tool.invoke(args)
+                            elif func_name == "websearch": res = search_tool.invoke(args)
+                            elif func_name == "hubstats": res = hub_stats_tool.invoke(args)
                             
                             messages.append({"role": "assistant", "content": f"I will now use {func_name}.", "tool_calls": [{"id": "xml_fix", "type": "function", "function": {"name": func_name, "arguments": json.dumps(args)}}]})
                             messages.append({"role": "tool", "tool_call_id": "xml_fix", "name": func_name, "content": str(res)})
