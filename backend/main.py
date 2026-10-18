@@ -249,7 +249,7 @@ def get_session(thread_id: str, user_id: str):
 
     if thread_id not in _sessions:
         # 🔹 Lazy Restore: try finding it in Supabase first
-        restored = restore_thread_into_memory(thread_id, user_id)
+        restored = restore_thread_into_memory(thread_id, user_id) if user_id != "guest" else None
         if restored:
             return restored
 
@@ -285,12 +285,16 @@ class ChatResponse(BaseModel):
 def rule_based_error_reply(error: Exception) -> str:
     """Turn known service failures into a useful, user-safe chat response."""
     message = str(error).lower()
+    if "model_not_found" in message or "does not exist" in message:
+        return "The AI model is temporarily unavailable. Please try again later."
     if "rate limit" in message or "ratelimit" in message or "429" in message:
         return "I am receiving too many requests right now. Please wait a moment and try again."
     if "timeout" in message or "timed out" in message:
         return "That took too long to complete. Please try again with a shorter request."
     if "connection" in message or "network" in message or "api key" in message:
         return "The assistant service is temporarily unavailable. Please try again in a moment."
+    if "llm provider" in message:
+        return "The assistant service is temporarily unavailable. Please try again later."
     if "pdf" in message or "document" in message:
         return "I could not use the uploaded document for that request. Please re-upload it or ask without the document."
     if "image" in message or "vision" in message:
@@ -754,6 +758,8 @@ def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
                 temp_agent.user_id = user_id
                 temp_agent.switch_thread("title_gen_temp")
                 title_res, _ = temp_agent(summary_prompt)
+                if title_res.startswith(("The AI model", "The assistant service", "I could not")):
+                    raise ValueError("Title generation returned a fallback response")
                 session["title"] = title_res.split('\n')[0].strip(' "')[:50]
             except Exception as e:
                 print(f"Title generation error: {e}")

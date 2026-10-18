@@ -38,6 +38,21 @@ if not DEFAULT_MODEL:
 
 VISION_MODEL = _model_with_provider(os.getenv("LLM_VISION_MODEL")) or DEFAULT_MODEL
 
+
+def rule_based_error_reply(error: Exception) -> str:
+    """Return a user-safe response for failures before an LLM answer exists."""
+    message = str(error).lower()
+    if "model_not_found" in message or "does not exist" in message:
+        return "The AI model is temporarily unavailable. Please try again later."
+    if "rate limit" in message or "ratelimit" in message or "429" in message:
+        return "I am receiving too many requests right now. Please wait a moment and try again."
+    if "api key" in message or "llm provider" in message:
+        return "The assistant service is temporarily unavailable. Please try again later."
+    if "timeout" in message or "timed out" in message or "connection" in message:
+        return "The assistant service is temporarily unavailable. Please try again in a moment."
+    return "I could not complete that request right now. Please try again."
+
+
 class BasicAgent:
     def __init__(self):
         self.threads: Dict[str, Dict] = {}
@@ -429,7 +444,7 @@ class BasicAgent:
                 except Exception as e:
                     err_str = str(e)
                     if "RateLimitError" in err_str or "rate_limit_exceeded" in err_str:
-                        reasoning_trace.append(f"ERROR in loop: {err_str}")
+                        reasoning_trace.append("ERROR in loop: Rate limit reached; rule-based fallback used.")
                         final_answer = "I’m temporarily rate-limited. Please retry in a few seconds."
                         break
                     # 🔹 IMPROVED XML RECOVERY (Handles LiteLLM BadRequest errors)
@@ -461,12 +476,12 @@ class BasicAgent:
                         except: pass
                     
                     if "tool_use_failed" in err_str or "failed_generation" in err_str:
-                        reasoning_trace.append(f"ERROR in loop: {err_str}")
+                        reasoning_trace.append("ERROR in loop: Tool call failed; retry the request.")
                         final_answer = "I had trouble calling a tool. Please retry the request."
                         break
 
-                    reasoning_trace.append(f"ERROR in loop: {str(e)}")
-                    final_answer = f"I encountered an error during research: {str(e)}"
+                    reasoning_trace.append("ERROR in loop: AI service unavailable; rule-based fallback used.")
+                    final_answer = rule_based_error_reply(e)
                     break
         finally:
             try: helium_kill_browser()
