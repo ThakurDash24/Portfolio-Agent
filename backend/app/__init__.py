@@ -24,6 +24,12 @@ litellm.set_verbose = False
 litellm.suppress_debug_info = True
 litellm.drop_params = True
 
+DEFAULT_MODEL = os.getenv("LLM_MODEL")
+if not DEFAULT_MODEL:
+    raise RuntimeError("LLM_MODEL must be set in the environment")
+
+VISION_MODEL = os.getenv("LLM_VISION_MODEL") or DEFAULT_MODEL
+
 class BasicAgent:
     def __init__(self):
         self.threads: Dict[str, Dict] = {}
@@ -306,7 +312,7 @@ class BasicAgent:
         import json
         import re
 
-        model = "groq/meta-llama/llama-4-scout-17b-16e-instruct"
+        model = VISION_MODEL if images and len(images) > 0 else DEFAULT_MODEL
 
         # 🔹 AGENTIC LOOP (Up to 5 turns)
         max_turns = 3
