@@ -81,7 +81,8 @@ LAVEN can read, chunk, and embed PDF files to answer context-specific questions.
     SUPABASE_URL=your_supabase_project_url
     SUPABASE_KEY=your_supabase_service_role_key
     GROQ_API_KEY=your_groq_api_key
-    LLM_MODEL=your_deployment_model_name
+    # LiteLLM requires the provider prefix, for example:
+    LLM_MODEL=groq/llama-3.3-70b-versatile
     # Optional: override only the image/vision model when needed
     LLM_VISION_MODEL=your_vision_model_name
     CORS_ORIGINS=http://localhost:3000

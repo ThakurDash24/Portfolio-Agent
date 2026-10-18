@@ -24,11 +24,19 @@ litellm.set_verbose = False
 litellm.suppress_debug_info = True
 litellm.drop_params = True
 
-DEFAULT_MODEL = os.getenv("LLM_MODEL")
+def _model_with_provider(value: Optional[str], default_provider: str = "groq") -> Optional[str]:
+    """Ensure LiteLLM can identify the provider for shorthand model names."""
+    if not value:
+        return None
+    model = value.strip().strip('"\'')
+    return model if "/" in model else f"{default_provider}/{model}"
+
+
+DEFAULT_MODEL = _model_with_provider(os.getenv("LLM_MODEL"))
 if not DEFAULT_MODEL:
     raise RuntimeError("LLM_MODEL must be set in the environment")
 
-VISION_MODEL = os.getenv("LLM_VISION_MODEL") or DEFAULT_MODEL
+VISION_MODEL = _model_with_provider(os.getenv("LLM_VISION_MODEL")) or DEFAULT_MODEL
 
 class BasicAgent:
     def __init__(self):

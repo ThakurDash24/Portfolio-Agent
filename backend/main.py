@@ -298,6 +298,11 @@ def rule_based_error_reply(error: Exception) -> str:
     return "I could not complete that request right now. Please try again, or ask your question another way."
 
 
+def is_llm_configuration_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return "llm provider not provided" in message or "api key not provided" in message
+
+
 class PdfUploadResponse(BaseModel):
     message: str
     filename: str
@@ -673,6 +678,11 @@ def guest_chat(req: ChatRequest):
             has_image=agent.has_image
         )
     except Exception as e:
+        if is_llm_configuration_error(e):
+            raise HTTPException(
+                status_code=502,
+                detail="The AI provider is not configured. Set LLM_MODEL with its provider prefix and configure the matching API key.",
+            ) from e
         err = str(e)
         if "RateLimitError" in err or "rate_limit_exceeded" in err:
             return ChatResponse(
@@ -763,6 +773,11 @@ def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
             has_image=agent.has_image
         )
     except Exception as e:
+        if is_llm_configuration_error(e):
+            raise HTTPException(
+                status_code=502,
+                detail="The AI provider is not configured. Set LLM_MODEL with its provider prefix and configure the matching API key.",
+            ) from e
         err = str(e)
         if "RateLimitError" in err or "rate_limit_exceeded" in err:
             return ChatResponse(
