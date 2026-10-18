@@ -282,6 +282,22 @@ class ChatResponse(BaseModel):
     has_image: bool = False
 
 
+def rule_based_error_reply(error: Exception) -> str:
+    """Turn known service failures into a useful, user-safe chat response."""
+    message = str(error).lower()
+    if "rate limit" in message or "ratelimit" in message or "429" in message:
+        return "I am receiving too many requests right now. Please wait a moment and try again."
+    if "timeout" in message or "timed out" in message:
+        return "That took too long to complete. Please try again with a shorter request."
+    if "connection" in message or "network" in message or "api key" in message:
+        return "The assistant service is temporarily unavailable. Please try again in a moment."
+    if "pdf" in message or "document" in message:
+        return "I could not use the uploaded document for that request. Please re-upload it or ask without the document."
+    if "image" in message or "vision" in message:
+        return "I could not analyze that image. Please upload it again or describe what you want to know."
+    return "I could not complete that request right now. Please try again, or ask your question another way."
+
+
 class PdfUploadResponse(BaseModel):
     message: str
     filename: str
@@ -669,7 +685,15 @@ def guest_chat(req: ChatRequest):
                 has_image=agent.has_image,
             )
         print(f"Guest Chat Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return ChatResponse(
+            response=rule_based_error_reply(e),
+            reasoning_trace="The request was handled by the fallback error response.",
+            thread_id=thread_id,
+            title=session.get("title", "Portfolio Chat"),
+            saved=False,
+            has_pdf=agent.has_pdf,
+            has_image=agent.has_image,
+        )
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -750,6 +774,15 @@ def chat(req: ChatRequest, user_id: str = Depends(get_optional_user)):
                 has_pdf=agent.has_pdf,
                 has_image=agent.has_image,
             )
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        print(f"Chat Error: {e}")
+        return ChatResponse(
+            response=rule_based_error_reply(e),
+            reasoning_trace="The request was handled by the fallback error response.",
+            thread_id=thread_id,
+            title=session["title"],
+            saved=session.get("saved", False) or agent.is_saved,
+            has_pdf=agent.has_pdf,
+            has_image=agent.has_image,
+        )
 
 # No SPA fallback needed for backend-only deployment.

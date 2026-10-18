@@ -38,6 +38,43 @@ interface Message {
     reasoningTrace?: string;
 }
 
+function getErrorReply(error: unknown): string {
+    const rawMessage = error instanceof Error ? error.message : String(error || '');
+    const message = rawMessage.toLowerCase();
+
+    if (message.includes('no auth token') || message.includes('401') || message.includes('unauthorized')) {
+        return 'Your session has expired. Please sign in again to continue.';
+    }
+    if (message.includes('403') || message.includes('access denied')) {
+        return 'I could not access that chat. Please start a new conversation and try again.';
+    }
+    if (message.includes('rate limit') || message.includes('ratelimit') || message.includes('429')) {
+        return 'I am receiving too many requests right now. Please wait a moment and try again.';
+    }
+    if (message.includes('failed to create thread') || message.includes('thread_id')) {
+        return 'I could not start this conversation. Please refresh the page and try again.';
+    }
+    if (message.includes('failed to get response') || message.includes('500') || message.includes('503')) {
+        return 'I could not complete that request right now. Please try again in a moment.';
+    }
+    if (message.includes('failed to fetch') || message.includes('network') || message.includes('backend')) {
+        return 'I cannot reach the assistant service right now. Please check that the backend is running and try again.';
+    }
+
+    return 'I could not process that request. Please try again, or ask your question another way.';
+}
+
+async function getResponseError(response: Response, fallback: string): Promise<Error> {
+    let detail = '';
+    try {
+        const data = await response.json();
+        detail = typeof data.detail === 'string' ? data.detail : '';
+    } catch {
+        // The server may return an empty or non-JSON error response.
+    }
+    return new Error(detail || `${fallback} (${response.status})`);
+}
+
 
 interface UseAutoResizeTextareaProps {
     minHeight: number;
@@ -380,7 +417,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                     method: "POST",
                     headers,
                 });
-                if (!response.ok) throw new Error("Failed to create thread");
+                if (!response.ok) throw await getResponseError(response, "Failed to create thread");
                 const threadData = await response.json();
                 activeThreadId = threadData.thread_id;
                 setCurrentThreadId(activeThreadId);
@@ -410,7 +447,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
                 }),
             });
 
-            if (!response.ok) throw new Error("Failed to get response");
+            if (!response.ok) throw await getResponseError(response, "Failed to get response");
 
             const data = await response.json();
 
@@ -460,7 +497,7 @@ export function AnimatedAIChat({ guestMode = false }: { guestMode?: boolean }) {
             console.error("Chat error:", error);
             const errorMessage: Message = {
                 id: (Date.now() + 1).toString(),
-                content: "Sorry, I encountered an error. Please try again.",
+                content: getErrorReply(error),
                 role: 'assistant',
                 timestamp: new Date(),
             };
