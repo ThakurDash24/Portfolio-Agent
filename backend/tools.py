@@ -325,6 +325,9 @@ def browser_search_tool(query: str) -> str:
                 return "\n\n".join(unique_results)
                     
             except Exception as e:
+                if "No module named 'mcp'" in str(e):
+                    trace_log("MCP is unavailable. Falling back to standard web search...")
+                    return search_the_web.invoke({"query": query})
                 return f"Browser error: {e}"
 
     # Wrapper with 20s timeout fallback

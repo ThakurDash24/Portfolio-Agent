@@ -9,6 +9,7 @@ langchain-core
 huggingface_hub
 rank_bm25
 ddgs
+mcp
 pandas
 openpyxl
 pypdf
